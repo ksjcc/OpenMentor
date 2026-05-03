@@ -1,0 +1,25 @@
+services:
+  app:
+    build:
+      context: .
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: agent_career
+      POSTGRES_USER: agent_career
+      POSTGRES_PASSWORD: agent_career
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
