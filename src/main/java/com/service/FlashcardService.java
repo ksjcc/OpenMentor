@@ -1,0 +1,136 @@
+package com.service;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.entity.Flashcard;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mapper.FlashcardMapper;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.time.LocalDateTime;
+import java.util.List;
+
+/**
+ * 闪卡服务
+ * 负责：创建闪卡、查询复习任务、更新复习结果
+ */
+@Service
+@RequiredArgsConstructor
+public class FlashcardService {
+    private final FlashcardMapper flashcardMapper;
+
+    public void createFlashcard(Long userId, String question, String answer, Integer difficulty) {
+        Flashcard card = new Flashcard();
+        card.setUserId(userId);
+        card.setQuestion(question);
+        card.setAnswer(answer);
+
+        card.setDifficulty(difficulty == null ? 2 : difficulty);
+
+        // 初始掌握度
+        card.setMasteryLevel(0);
+
+        // 第一次复习：明天
+        card.setNextReviewTime(LocalDateTime.now().plusDays(1));
+
+        card.setCreatedAt(LocalDateTime.now());
+
+        flashcardMapper.insert(card);
+    }
+
+    /**
+     * 批量创建闪卡（从AI提炼结果）
+     */
+    public void batchCreate(Long userId, List<Flashcard> cards) {
+        for (Flashcard c : cards) {
+            c.setUserId(userId);
+            c.setMasteryLevel(0);
+            c.setNextReviewTime(LocalDateTime.now().plusDays(1));
+            c.setCreatedAt(LocalDateTime.now());
+            flashcardMapper.insert(c);
+        }
+    }
+
+    /**
+     * 获取“今天需要复习”的卡片
+     */
+    public List<Flashcard> getTodayReview(Long userId) {
+        /**
+         * 1. 筛选出用户ID匹配且复习时间小于等于当前时间的卡片
+         * 2. 按复习时间排序，确保先复习到期的卡片
+         */
+        return flashcardMapper.selectList(
+                new LambdaQueryWrapper<Flashcard>()
+                        .eq(Flashcard::getUserId, userId)
+                        .le(Flashcard::getNextReviewTime, LocalDateTime.now())
+                        .orderByAsc(Flashcard::getNextReviewTime));
+    }
+
+    /**
+     * 用户完成复习后更新状态（简单版间隔重复）
+     */
+    public void review(Long cardId, boolean correct) {
+
+        Flashcard card = flashcardMapper.selectById(cardId);
+
+        if (card == null)
+            return;
+
+        int mastery = card.getMasteryLevel();
+
+        if (correct) {
+            mastery += 20;
+        } else {
+            mastery -= 10;
+        }
+
+        mastery = Math.max(0, Math.min(100, mastery));
+
+        card.setMasteryLevel(mastery);
+
+        // 简单间隔算法
+        int intervalDays;
+        if (mastery < 30)
+            intervalDays = 1;
+        else if (mastery < 60)
+            intervalDays = 3;
+        else if (mastery < 80)
+            intervalDays = 7;
+        else
+            intervalDays = 15;
+
+        card.setNextReviewTime(LocalDateTime.now().plusDays(intervalDays));
+
+        flashcardMapper.updateById(card);
+    }
+
+    public void generateFlashcardsFromExtraction(Long userId, String extractionJson)
+            throws JsonMappingException, JsonProcessingException {
+        if (extractionJson == null || extractionJson.isBlank()) {
+            return;
+        }
+        try {
+            JsonNode root = new ObjectMapper().readTree(extractionJson);
+            JsonNode flashcardsNode = root.path("flashcards");
+            if (!flashcardsNode.isArray()) {
+                return;
+            }
+            for (JsonNode cardNode : flashcardsNode) {
+                String question = cardNode.path("question").asText();
+                String answer = cardNode.path("answer").asText();
+                int difficulty = cardNode.path("difficulty").asInt(2);
+                if (!question.isBlank() && !answer.isBlank()) {
+                    createFlashcard(userId, question, answer, difficulty);
+                }
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("解析闪卡 JSON 失败", e);
+        }
+
+    }
+}

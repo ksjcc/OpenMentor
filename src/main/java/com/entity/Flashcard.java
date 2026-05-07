@@ -1,41 +1,50 @@
 package com.entity;
 
+import java.time.LocalDateTime;
+
+import com.baomidou.mybatisplus.annotation.TableName;
+
+import lombok.Data;
+
+/**
+ * 闪卡（用于复习系统）
+ */
+@Data
+@TableName("flashcard")
 public class Flashcard {
-
     private Long id;
+
     private Long userId;
-    private String front;
-    private String back;
 
-    public Long getId() {
-        return id;
-    }
+    /**
+     * 问题（正面）
+     */
+    private String question;
 
-    public void setId(Long id) {
-        this.id = id;
-    }
+    /**
+     * 答案（背面）
+     */
+    private String answer;
 
-    public Long getUserId() {
-        return userId;
-    }
+    /**
+     * 关联知识点ID（可选）
+     */
+    private Long knowledgeNodeId;
 
-    public void setUserId(Long userId) {
-        this.userId = userId;
-    }
+    /**
+     * 难度（1-5）
+     */
+    private Integer difficulty;
 
-    public String getFront() {
-        return front;
-    }
+    /**
+     * 掌握程度（0-100）
+     */
+    private Integer masteryLevel;
 
-    public void setFront(String front) {
-        this.front = front;
-    }
+    /**
+     * 下一次复习时间
+     */
+    private LocalDateTime nextReviewTime;
 
-    public String getBack() {
-        return back;
-    }
-
-    public void setBack(String back) {
-        this.back = back;
-    }
+    private LocalDateTime createdAt;
 }

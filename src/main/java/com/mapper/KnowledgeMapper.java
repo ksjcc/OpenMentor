@@ -1,4 +1,7 @@
 package com.mapper;
 
-public interface KnowledgeMapper {
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.entity.KnowledgeNode;
+
+public interface KnowledgeMapper extends BaseMapper<KnowledgeNode> {
 }

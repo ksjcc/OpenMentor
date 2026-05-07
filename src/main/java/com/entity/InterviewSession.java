@@ -2,13 +2,22 @@ package com.entity;
 
 import java.time.LocalDateTime;
 
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableName;
+
+@TableName("interview_session")
 public class InterviewSession {
 
     private Long id;
     private Long userId;
-    private String sessionId;
+    private String interviewType;
+    private String targetRole;
     private String status;
-    private LocalDateTime createdAt;
+    private Integer score;
+    private String summary;
+    @TableField("created_at")
+    private LocalDateTime startTime;
+    private LocalDateTime endedAt;
 
     public Long getId() {
         return id;
@@ -26,14 +35,6 @@ public class InterviewSession {
         this.userId = userId;
     }
 
-    public String getSessionId() {
-        return sessionId;
-    }
-
-    public void setSessionId(String sessionId) {
-        this.sessionId = sessionId;
-    }
-
     public String getStatus() {
         return status;
     }
@@ -42,11 +43,52 @@ public class InterviewSession {
         this.status = status;
     }
 
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
+    public void setScore(Integer score) {
+        this.score = score;
     }
 
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
+    public Integer getScore() {
+        return score;
     }
+
+    public String getSummary() {
+        return summary;
+    }
+
+    public void setSummary(String summary) {
+        this.summary = summary;
+    }
+
+    public String getInterviewType() {
+        return interviewType;
+    }
+
+    public void setInterviewType(String interviewType) {
+        this.interviewType = interviewType;
+    }
+
+    public String getTargetRole() {
+        return targetRole;
+    }
+
+    public void setTargetRole(String targetRole) {
+        this.targetRole = targetRole;
+    }
+
+    public LocalDateTime getStartTime() {
+        return startTime;
+    }
+
+    public void setStartTime(LocalDateTime startTime) {
+        this.startTime = startTime;
+    }
+
+    public LocalDateTime getEndedAt() {
+        return endedAt;
+    }
+
+    public void setEndedAt(LocalDateTime endedAt) {
+        this.endedAt = endedAt;
+    }
+
 }

@@ -1,11 +1,16 @@
 package com.ai.client;
 
+import dev.langchain4j.model.chat.ChatLanguageModel;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 @Component
+@RequiredArgsConstructor
 public class LlmClient {
 
-    public String chat(String prompt) {
-        return "";
+    private final ChatLanguageModel chatModel;
+
+    public String chat(String message) {
+        return chatModel.generate(message);
     }
 }

@@ -9,17 +9,20 @@ services:
     depends_on:
       - postgres
       - redis
+      - mysql
 
-  postgres:
-    image: pgvector/pgvector:pg16
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_DB: agent_career
-      POSTGRES_USER: agent_career
-      POSTGRES_PASSWORD: agent_career
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
+mysql:
+  image: mysql:8.4
+  ports:
+    - "3306:3306"
+  environment:
+    MYSQL_DATABASE: career_mind
+    MYSQL_ROOT_PASSWORD: 12345
+  volumes:
+    - mysql_data:/var/lib/mysql
+volumes:
+  mysql_data:
+redis:
+  image: redis:7-alpine
+  ports:
+    - "6379:6379"
