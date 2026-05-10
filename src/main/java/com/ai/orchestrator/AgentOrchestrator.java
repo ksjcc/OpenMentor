@@ -1,16 +1,15 @@
 package com.ai.orchestrator;
 
-import com.ai.agent.CareerMentorAgent;
 import com.ai.agent.FollowUpAgent;
 import com.ai.agent.KnowledgeExtractorAgent;
-import com.ai.agent.MemoryUpdateAgent;
-import com.ai.agent.ReviewPlannerAgent;
 import com.ai.agent.ScoreAgent;
 import com.ai.agent.TechInterviewerAgent;
 import com.ai.prompt.PromptBuilder;
+import com.ai.rag.HybridRetriever;
 import com.dto.InterviewReplyDTO;
-import com.entity.MemoryChunk;
 import com.service.MemoryService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import lombok.RequiredArgsConstructor;
 
@@ -33,6 +32,8 @@ public class AgentOrchestrator {
     private final KnowledgeExtractorAgent knowledgeExtractorAgent;
     private final PromptBuilder promptBuilder;
     private final MemoryService memoryService;
+    private final HybridRetriever hybridRetriever;
+    private final ObjectMapper objectMapper;
 
     /**
      * 生成面试第一题
@@ -49,10 +50,10 @@ public class AgentOrchestrator {
         String summaryMd = memoryService.getLastSummaryMd(userId, "interview-extraction");
 
         // 3. 检索与当前主题相关的历史记忆
-        List<MemoryChunk> relatedMemories = memoryService.searchRelevantChunks(userId, topic, 5);
+        List<String> relatedMemories = hybridRetriever.retrieve(userId, topic, 5);
 
-        // 4. 构造给面试官 Agent 的输入
-        String input = promptBuilder.buildTechInterviewInput(
+        // 4. 构造 Agent 输入
+        String input = promptBuilder.buildTechInterviewInputwithMemoryTexts(
                 profileJson,
                 summaryMd,
                 relatedMemories,
@@ -102,8 +103,9 @@ public class AgentOrchestrator {
                 请判断下一步是追问、换题还是提高难度。
                 """.formatted(topic, question, answer, scoreJson);
         String decisionJson = followUpAgent.decide(decisionInput);
+        String action = parseDecisionAction(decisionJson);
         // 3. 根据决策结果生成下一步问题
-        if (decisionJson.contains("FOLLOW_UP")) {
+        if ("FOLLOW_UP".equals(action)) {
 
             String followUpInput = """
                     用户刚才回答得不完整，请围绕同一个问题继续追问。
@@ -124,7 +126,7 @@ public class AgentOrchestrator {
             reply.setContent(followUpQuestion);
             return reply;
         }
-        if (decisionJson.contains("HARDER")) {
+        if ("HARDER".equals(action)) {
 
             String harderInput = """
                     用户回答较好，请围绕当前主题提出一个更高难度的问题。
@@ -159,5 +161,46 @@ public class AgentOrchestrator {
      */
     public String extractKnowledge(String dialogue) {
         return knowledgeExtractorAgent.extract(dialogue);
+    }
+
+    private String parseDecisionAction(String decisionJson) {
+        if (decisionJson == null || decisionJson.isBlank()) {
+            return "NEXT";
+        }
+
+        try {
+            JsonNode root = objectMapper.readTree(normalizeJson(decisionJson));
+            String action = root.path("action").asText("NEXT").trim();
+            if ("FOLLOW_UP".equals(action) || "HARDER".equals(action) || "NEXT".equals(action)) {
+                return action;
+            }
+        } catch (Exception ignored) {
+            if (decisionJson.contains("FOLLOW_UP")) {
+                return "FOLLOW_UP";
+            }
+            if (decisionJson.contains("HARDER")) {
+                return "HARDER";
+            }
+        }
+
+        return "NEXT";
+    }
+
+    private String normalizeJson(String json) {
+        String cleaned = json.trim();
+        if (cleaned.startsWith("```")) {
+            cleaned = cleaned
+                    .replaceFirst("^```(?:json)?\\s*", "")
+                    .replaceFirst("\\s*```$", "")
+                    .trim();
+        }
+
+        int start = cleaned.indexOf('{');
+        int end = cleaned.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+            return cleaned.substring(start, end + 1);
+        }
+
+        return cleaned;
     }
 }

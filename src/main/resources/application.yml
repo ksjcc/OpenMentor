@@ -43,3 +43,18 @@ langchain4j:
       base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
       model-name: qwen-plus
       temperature: 0.7
+    embedding-model:
+      api-key: ${DASHSCOPE_API_KEY:}
+      base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      model-name: ${AI_EMBEDDING_MODEL:text-embedding-v3}
+      dimensions: ${AI_EMBEDDING_DIMENSIONS:1024}
+
+vector-store:
+  pg:
+    url: jdbc:postgresql://${PGVECTOR_HOST:127.0.0.1}:${PGVECTOR_PORT:5432}/${PGVECTOR_DATABASE:career_vector}
+    username: ${PGVECTOR_USERNAME:postgres}
+    password: ${PGVECTOR_PASSWORD:12345}
+    table: ${PGVECTOR_TABLE:memory_vector}
+    dimension: ${AI_EMBEDDING_DIMENSIONS:1024}
+    min-score: ${PGVECTOR_MIN_SCORE:0.6}
+    initialize-schema: ${PGVECTOR_INITIALIZE_SCHEMA:true}

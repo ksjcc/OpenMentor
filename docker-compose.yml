@@ -4,25 +4,51 @@ services:
       context: .
     ports:
       - "8080:8080"
-    env_file:
-      - .env
+    environment:
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: career_mind
+      MYSQL_USERNAME: root
+      MYSQL_PASSWORD: 12345
+      PGVECTOR_HOST: postgres
+      PGVECTOR_PORT: 5432
+      PGVECTOR_DATABASE: career_vector
+      PGVECTOR_USERNAME: postgres
+      PGVECTOR_PASSWORD: 12345
+      AI_EMBEDDING_MODEL: text-embedding-v3
+      AI_EMBEDDING_DIMENSIONS: 1024
     depends_on:
-      - postgres
       - redis
       - mysql
+      - postgres
 
-mysql:
-  image: mysql:8.4
-  ports:
-    - "3306:3306"
-  environment:
-    MYSQL_DATABASE: career_mind
-    MYSQL_ROOT_PASSWORD: 12345
-  volumes:
-    - mysql_data:/var/lib/mysql
+  mysql:
+    image: mysql:8.4
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_DATABASE: career_mind
+      MYSQL_ROOT_PASSWORD: 12345
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: career_vector
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 12345
+    volumes:
+      - pgvector_data:/var/lib/postgresql/data
+
 volumes:
   mysql_data:
-redis:
-  image: redis:7-alpine
-  ports:
-    - "6379:6379"
+  pgvector_data:

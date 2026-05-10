@@ -1,31 +1,30 @@
 package com.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.ai.rag.VectorStoreService;
+import com.dto.extraction.KnowledgeExtractionResult;
+
 import org.springframework.stereotype.Service;
 import com.mapper.MemoryProfileJsonMapper;
 import com.mapper.MemorySummaryMdMapper;
-import com.mapper.FlashcardMapper;
 import com.mapper.MemoryChunkMapper;
 import com.entity.MemoryProfileJson;
 import com.entity.MemorySummaryMd;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonMappingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.entity.Flashcard;
 import com.entity.MemoryChunk;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
-import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class MemoryService {
     private final MemoryProfileJsonMapper memoryProfileJsonMapper;
     private final MemorySummaryMdMapper memorySummaryMdMapper;
     private final MemoryChunkMapper memoryChunkMapper;
-    private final FlashcardMapper flashcardMapper;
+    private final VectorStoreService vectorStoreService;
+    private final ProfileMergeService profileMergeService;
 
     public void saveProfileJson(Long userId, String profileJson) {
         LambdaQueryWrapper<MemoryProfileJson> wrapper = new LambdaQueryWrapper<>();
@@ -42,7 +41,7 @@ public class MemoryService {
         if (old == null) {
             memory.setVersion(1);
         } else {
-            memory.setVersion(old.getVersion() + 1);
+            memory.setVersion((old.getVersion() == null ? 0 : old.getVersion()) + 1);
         }
         memoryProfileJsonMapper.insert(memory);
     }
@@ -81,6 +80,7 @@ public class MemoryService {
         wrapper.eq(MemorySummaryMd::getUserId, userId)
                 .eq(MemorySummaryMd::getSummaryType, summaryType)
                 .orderByDesc(MemorySummaryMd::getId)
+
                 .last("limit 1");
         MemorySummaryMd memory = memorySummaryMdMapper.selectOne(wrapper);
         if (memory == null) {
@@ -91,6 +91,8 @@ public class MemoryService {
 
     /**
      * 保存语义记忆chunk
+     * 1. 保存到 MySQL 的 memory_chunk 表，方便追溯来源
+     * 2. 写入向量库，方便后续 RAG 语义召回
      */
     public void saveChunk(Long userId, String sourceType, Long sourceId, String content) {
         MemoryChunk chunk = new MemoryChunk();
@@ -100,6 +102,7 @@ public class MemoryService {
         chunk.setContent(content);
         chunk.setEmbedding(null); // 第一版先不做 embedding
         memoryChunkMapper.insert(chunk);
+        addMemoryTextSafely(userId, chunk.getId(), content);
     }
 
     /**
@@ -139,34 +142,57 @@ public class MemoryService {
     }
 
     /**
-     * 从提炼结果中生成闪卡（简单版：直接解析字符串）
-     * 
-     * @throws JsonProcessingException
-     * @throws JsonMappingException
+     * 根据 AI 提炼结果更新长期记忆
+     *
+     * @param userId     用户ID
+     * @param sessionId  面试ID
+     * @param extraction AI提炼结果
      */
-    public void generateFlashcardsFromExtraction(Long userId, String extractionJson)
-            throws JsonMappingException, JsonProcessingException {
-        if (extractionJson == null || extractionJson.isEmpty()) {
+    public void updateMemoryFromExtraction(Long userId, Long sessionId, KnowledgeExtractionResult extraction) {
+        if (extraction == null) {
             return;
         }
-        // 1. 解析 JSON 字符串
-        JsonNode root = new ObjectMapper().readTree(extractionJson);
-        JsonNode flashcardsNode = root.path("flashcards");
-        if (!flashcardsNode.isArray()) {
+
+        profileMergeService.mergeAndSave(userId, extraction);
+
+        if (extraction.getMemory() == null) {
             return;
         }
-        // 2. 遍历每个闪卡项
-        for (JsonNode cardNode : flashcardsNode) {
-            String question = cardNode.path("question").asText();
-            String answer = cardNode.path("answer").asText();
-            // 3. 保存到数据库
-            Flashcard flashcard = new Flashcard();
-            flashcard.setUserId(userId);
-            flashcard.setQuestion(question);
-            flashcard.setAnswer(answer);
-            flashcard.setMasteryLevel(0); // 初始熟练度设为 0
-            flashcard.setNextReviewTime(LocalDateTime.now()); // 初始下次复习时间设为当前时间
-            flashcardMapper.insert(flashcard);
+
+        // 1. 写入 Markdown 总结
+        if (!isBlank(extraction.getMemory().getMarkdownSummary())) {
+            saveSummaryMd(
+                    userId,
+                    "overall",
+                    extraction.getMemory().getMarkdownSummary());
+        }
+
+        // 2. 写入 RAG Chunk
+        if (extraction.getMemory().getChunks() != null) {
+            for (String chunk : extraction.getMemory().getChunks()) {
+                if (isBlank(chunk)) {
+                    continue;
+                }
+
+                saveChunk(
+                        userId,
+                        "interview",
+                        sessionId,
+                        chunk);
+            }
+        }
+
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
+    private void addMemoryTextSafely(Long userId, Long memoryChunkId, String content) {
+        try {
+            vectorStoreService.addMemoryText(userId, memoryChunkId, content);
+        } catch (Exception e) {
+            log.warn("写入向量库失败，已保留MySQL记忆记录：{}", e.getMessage());
         }
     }
 }

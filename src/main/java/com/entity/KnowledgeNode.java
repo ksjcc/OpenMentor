@@ -1,32 +1,29 @@
 package com.entity;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import lombok.Data;
+
+@Data
+@TableName("knowledge_node")
 public class KnowledgeNode {
 
+    @TableId(type = IdType.AUTO)
     private Long id;
+
+    private Long userId;
+
     private String title;
+
     private String content;
 
-    public Long getId() {
-        return id;
-    }
+    private String nodeType;
 
-    public void setId(Long id) {
-        this.id = id;
-    }
+    private Integer masteryLevel;
 
-    public String getTitle() {
-        return title;
-    }
+    private Integer importanceScore;
 
-    public void setTitle(String title) {
-        this.title = title;
-    }
+    private Integer occurrenceCount;
 
-    public String getContent() {
-        return content;
-    }
-
-    public void setContent(String content) {
-        this.content = content;
-    }
 }

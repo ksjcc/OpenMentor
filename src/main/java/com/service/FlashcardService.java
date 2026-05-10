@@ -1,16 +1,12 @@
 package com.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.dto.extraction.FlashcardDTO;
+import com.dto.extraction.KnowledgeExtractionResult;
 import com.entity.Flashcard;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonMappingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mapper.FlashcardMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -109,28 +105,25 @@ public class FlashcardService {
         flashcardMapper.updateById(card);
     }
 
-    public void generateFlashcardsFromExtraction(Long userId, String extractionJson)
-            throws JsonMappingException, JsonProcessingException {
-        if (extractionJson == null || extractionJson.isBlank()) {
+    public void generateFlashcardsFromExtraction(Long userId, KnowledgeExtractionResult extraction) {
+        if (extraction == null || extraction.getFlashcards() == null || extraction.getFlashcards().isEmpty()) {
             return;
         }
-        try {
-            JsonNode root = new ObjectMapper().readTree(extractionJson);
-            JsonNode flashcardsNode = root.path("flashcards");
-            if (!flashcardsNode.isArray()) {
-                return;
-            }
-            for (JsonNode cardNode : flashcardsNode) {
-                String question = cardNode.path("question").asText();
-                String answer = cardNode.path("answer").asText();
-                int difficulty = cardNode.path("difficulty").asInt(2);
-                if (!question.isBlank() && !answer.isBlank()) {
-                    createFlashcard(userId, question, answer, difficulty);
-                }
-            }
-        } catch (Exception e) {
-            throw new RuntimeException("解析闪卡 JSON 失败", e);
-        }
 
+        for (FlashcardDTO card : extraction.getFlashcards()) {
+            if (card == null || isBlank(card.getQuestion()) || isBlank(card.getAnswer())) {
+                continue;
+            }
+
+            createFlashcard(
+                    userId,
+                    card.getQuestion(),
+                    card.getAnswer(),
+                    card.getDifficulty());
+        }
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 }

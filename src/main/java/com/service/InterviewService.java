@@ -6,6 +6,8 @@ import com.ai.agent.TechInterviewerAgent;
 import com.ai.orchestrator.AgentOrchestrator;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.dto.InterviewReplyDTO;
+import com.dto.extraction.KnowledgeExtractionResult;
+import com.dto.graph.KnowledgeGraphBuilder;
 import com.entity.InterviewMessage;
 import com.entity.InterviewSession;
 import com.ai.agent.FollowUpAgent;
@@ -39,6 +41,8 @@ public class InterviewService {
         private final InterviewSessionMapper interviewSessionMapper;
         private final AgentOrchestrator agentOrchestrator;
         private final FlashcardService flashcardService;
+        private final JsonParseService jsonParseService;
+        private final KnowledgeGraphBuilder knowledgeGraphBuilder;
 
         /**
          * 创建一场新的面试，并生成第一道问题
@@ -119,10 +123,10 @@ public class InterviewService {
                 // 因为评分需要知道：用户是在回答哪个问题
 
                 InterviewMessage lastAiQuestion = getLastAiMessage(sessionId);
-
-                String question = lastAiQuestion == null
-                                ? "未知问题"
-                                : lastAiQuestion.getContent();
+                if (lastAiQuestion == null || isBlank(lastAiQuestion.getContent())) {
+                        throw new BizException(ErrorCode.BAD_REQUEST, "当前面试没有可回答的AI问题");
+                }
+                String question = lastAiQuestion.getContent();
 
                 // 3. 调用 AgentOrchestrator：
                 // 评分 → 决策 → 生成追问/下一题
@@ -199,25 +203,28 @@ public class InterviewService {
                         throw new BizException(ErrorCode.INTERNAL_ERROR, "AI未生成知识提炼结果");
                 }
 
-                // 4. 写入长期记忆
-                // JSON / MD / Chunk 三层记忆
-                memoryService.saveInterviewExtraction(
+                // 4. json解析
+                KnowledgeExtractionResult extraction = jsonParseService.parseExtraction(extractionJson);
+                // 构建知识图谱
+                knowledgeGraphBuilder.buildGraph(
+                                userId,
+                                extraction);
+                // 5.更新长期记忆
+                memoryService.updateMemoryFromExtraction(
                                 userId,
                                 sessionId,
-                                extractionJson);
+                                extraction);
+                // 6. 自动生成闪卡
+                flashcardService.generateFlashcardsFromExtraction(
+                                userId,
+                                extraction);
 
-                // 5. 从提炼结果中生成闪卡
-                generateFlashcardsSafely(userId, extractionJson);
-
-                // 6. 更新面试 session 状态
                 InterviewSession session = new InterviewSession();
                 session.setId(sessionId);
                 session.setStatus(STATUS_FINISHED);
                 session.setSummary(extractionJson);
                 session.setEndedAt(LocalDateTime.now());
-
                 interviewSessionMapper.updateById(session);
-
                 return extractionJson;
         }
 
@@ -340,7 +347,7 @@ public class InterviewService {
                 if (!userId.equals(session.getUserId())) {
                         throw new BizException(ErrorCode.UNAUTHORIZED, "无权访问该面试");
                 }
-                if (STATUS_FINISHED.equals(session.getStatus())) {
+                if (!STATUS_IN_PROGRESS.equals(session.getStatus())) {
                         throw new BizException(ErrorCode.BAD_REQUEST, "面试已结束");
                 }
                 return session;
@@ -368,13 +375,4 @@ public class InterviewService {
         private boolean isBlank(String value) {
                 return value == null || value.isBlank();
         }
-
-        private void generateFlashcardsSafely(Long userId, String extractionJson) {
-                try {
-                        flashcardService.generateFlashcardsFromExtraction(userId, extractionJson);
-                } catch (Exception e) {
-                        System.err.println("生成闪卡失败：" + e.getMessage());
-                }
-        }
-
 }
