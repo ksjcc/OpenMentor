@@ -2,8 +2,8 @@ package com.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.dto.graph.*;
-import com.entity.KnowledgeNode;
-import com.entity.KnowledgeRelation;
+import com.entity.graphrag.GraphRagEntity;
+import com.entity.graphrag.GraphRagRelationship;
 import com.mapper.KnowledgeNodeMapper;
 import com.mapper.KnowledgeRelationMapper;
 import lombok.RequiredArgsConstructor;
@@ -23,21 +23,21 @@ public class KnowledgeGraphService {
 
   public GraphDTO getGraph(Long userId) {
     GraphDTO graph = new GraphDTO();
-    List<KnowledgeNode> nodes = knowledgeNodeMapper.selectList(
-        new LambdaQueryWrapper<KnowledgeNode>()
-            .eq(KnowledgeNode::getUserId, userId));
-    List<KnowledgeRelation> relations = knowledgeRelationMapper.selectList(
-        new LambdaQueryWrapper<KnowledgeRelation>()
-            .eq(KnowledgeRelation::getUserId, userId));
+    List<GraphRagEntity> nodes = knowledgeNodeMapper.selectList(
+        new LambdaQueryWrapper<GraphRagEntity>()
+            .eq(GraphRagEntity::getUserId, userId));
+    List<GraphRagRelationship> relations = knowledgeRelationMapper.selectList(
+        new LambdaQueryWrapper<GraphRagRelationship>()
+            .eq(GraphRagRelationship::getUserId, userId));
     List<GraphNodeDTO> nodeDTOs = new ArrayList<>();
-    for (KnowledgeNode node : nodes) {
+    for (GraphRagEntity node : nodes) {
 
       GraphNodeDTO dto = new GraphNodeDTO();
 
       dto.setId(node.getId());
-      dto.setName(node.getTitle());
-      dto.setType(node.getNodeType());
-      dto.setMasteryLevel(node.getMasteryLevel());
+      dto.setName(node.getName());
+      dto.setType(node.getType());
+      dto.setMasteryLevel(node.getImportanceScore());
       dto.setImportanceScore(node.getImportanceScore());
 
       nodeDTOs.add(dto);
@@ -45,15 +45,15 @@ public class KnowledgeGraphService {
 
     List<GraphLinkDTO> linkDTOs = new ArrayList<>();
 
-    for (KnowledgeRelation relation : relations) {
+    for (GraphRagRelationship relation : relations) {
 
       GraphLinkDTO dto = new GraphLinkDTO();
 
       dto.setSource(
-          relation.getSourceNodeId());
+          relation.getSourceEntityId());
 
       dto.setTarget(
-          relation.getTargetNodeId());
+          relation.getTargetEntityId());
 
       dto.setRelationType(
           relation.getRelationType());

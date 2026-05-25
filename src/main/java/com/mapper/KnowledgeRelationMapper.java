@@ -1,8 +1,8 @@
 package com.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.entity.KnowledgeRelation;
+import com.entity.graphrag.GraphRagRelationship;
 
-public interface KnowledgeRelationMapper extends BaseMapper<KnowledgeRelation> {
+public interface KnowledgeRelationMapper extends BaseMapper<GraphRagRelationship> {
 
 }

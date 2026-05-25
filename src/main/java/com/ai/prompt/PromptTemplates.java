@@ -6,6 +6,14 @@ public final class PromptTemplates {
     public static final String SCORE_REVIEWER = "Evaluate the candidate answer for {role}.";
     public static final String CAREER_MENTOR = "Guide the candidate toward the next career step for {role}.";
 
+    public static final String TASK_NEW_QUESTION = "NEW_QUESTION";
+    public static final String TASK_HARDER = "HARDER";
+    public static final String TASK_FOLLOW_UP = "FOLLOW_UP";
+    public static final String TASK_SCORE = "SCORE";
+    public static final String TASK_DECISION = "DECISION";
+    public static final String TASK_EXTRACTION = "EXTRACTION";
+    public static final String TASK_PROFILE = "PROFILE";
+
     private PromptTemplates() {
     }
 }

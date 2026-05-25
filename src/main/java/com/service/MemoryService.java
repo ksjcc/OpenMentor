@@ -61,6 +61,10 @@ public class MemoryService {
         return memory.getProfileData();
     }
 
+    public String getLatestProfileJson(Long userId) {
+        return getLastProfileJson(userId);
+    }
+
     /**
      * 保存用户的summaryMd
      */
@@ -87,6 +91,10 @@ public class MemoryService {
             return null;
         }
         return memory.getContent();
+    }
+
+    public String getLatestSummaryMd(Long userId, String summaryType) {
+        return getLastSummaryMd(userId, summaryType);
     }
 
     /**
@@ -116,6 +124,13 @@ public class MemoryService {
                 .last("LIMIT " + limit);
 
         return memoryChunkMapper.selectList(wrapper);
+    }
+
+    public List<String> retrieveRelevantMemories(Long userId, String keyword) {
+        return searchRelevantChunks(userId, keyword, 5)
+                .stream()
+                .map(MemoryChunk::getContent)
+                .toList();
     }
 
     public void saveInterviewExtraction(Long userId, Long sessionId, String extractionJson) {

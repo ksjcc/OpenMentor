@@ -2,10 +2,17 @@ package com.service;
 
 import com.common.BizException;
 import com.common.ErrorCode;
+import com.dto.graphrag.CommunityReportResult;
+import com.dto.graphrag.GraphExtractionResult;
 import com.dto.extraction.KnowledgeExtractionResult;
+import com.dto.score.ScoreResultDTO;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * JSON解析服务
@@ -43,6 +50,22 @@ public class JsonParseService {
     }
   }
 
+  public GraphExtractionResult parseGraphExtraction(String json) {
+    if (json == null || json.isBlank()) {
+      return new GraphExtractionResult();
+    }
+
+    try {
+      return objectMapper.readValue(
+          normalizeJson(json),
+          GraphExtractionResult.class);
+    } catch (Exception e) {
+      throw new BizException(
+          ErrorCode.INTERNAL_ERROR,
+          "解析 GraphRAG 抽取 JSON 失败：" + e.getMessage());
+    }
+  }
+
   private String normalizeJson(String json) {
     if (json == null || json.isBlank()) {
       throw new BizException(ErrorCode.INTERNAL_ERROR, "知识提炼结果为空");
@@ -63,5 +86,80 @@ public class JsonParseService {
     }
 
     return cleaned;
+  }
+
+  public ScoreResultDTO parseScore(String json) {
+    try {
+      String cleanJson = cleanJson(json);
+      return objectMapper.readValue(cleanJson, ScoreResultDTO.class);
+    } catch (Exception e) {
+      ScoreResultDTO fallback = new ScoreResultDTO();
+      fallback.setScore(50);
+      fallback.setTechnical(15);
+      fallback.setCompleteness(15);
+      fallback.setExpression(20);
+      fallback.setIsWeak(true);
+      fallback.setFeedback("评分解析失败，使用默认低分兜底。");
+      fallback.setWeakPoints(List.of("回答不完整"));
+      return fallback;
+    }
+  }
+
+  public CommunityReportResult parseCommunityReport(String json) {
+    if (json == null || json.isBlank()) {
+      return new CommunityReportResult();
+    }
+
+    try {
+      String normalized = normalizeJson(json);
+      return objectMapper.readValue(normalized, CommunityReportResult.class);
+    } catch (Exception e) {
+      throw new IllegalArgumentException("解析 GraphRAG 社区报告 JSON 失败：" + e.getMessage(), e);
+    }
+  }
+
+  public List<String> parseDriftQuestion(String json) {
+    try {
+      JsonNode root = objectMapper.readTree(cleanJson(json));
+      JsonNode queries = root.path("queries");
+      if (!queries.isArray()) {
+        return List.of();
+      }
+
+      List<String> result = new ArrayList<>();
+      for (JsonNode query : queries) {
+        String value = query.asText();
+        if (value != null && !value.isBlank()) {
+          result.add(value);
+        }
+      }
+      return result;
+    } catch (Exception e) {
+      return List.of();
+    }
+  }
+
+  /**
+   * 清洗 AI 返回的 JSON
+   */
+  private String cleanJson(String raw) {
+    if (raw == null) {
+      return "{}";
+    }
+
+    String text = raw.trim();
+
+    text = text.replace("```json", "")
+        .replace("```", "")
+        .trim();
+
+    int start = text.indexOf("{");
+    int end = text.lastIndexOf("}");
+
+    if (start >= 0 && end > start) {
+      return text.substring(start, end + 1);
+    }
+
+    return text;
   }
 }

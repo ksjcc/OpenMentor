@@ -2,11 +2,12 @@ package com.service;
 
 import com.common.BizException;
 import com.common.ErrorCode;
+import com.common.GraphRagMode;
 import com.ai.agent.TechInterviewerAgent;
 import com.ai.orchestrator.AgentOrchestrator;
+import com.ai.orchestrator.OrchestratorResult;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.dto.InterviewReplyDTO;
-import com.dto.extraction.KnowledgeExtractionResult;
 import com.dto.graph.KnowledgeGraphBuilder;
 import com.entity.InterviewMessage;
 import com.entity.InterviewSession;
@@ -14,11 +15,21 @@ import com.ai.agent.FollowUpAgent;
 import com.ai.agent.ScoreAgent;
 import com.mapper.InterviewMessageMapper;
 import com.mapper.InterviewSessionMapper;
+import com.service.cache.AiRateLimitService;
+import com.service.cache.InterviewMemoryCacheService;
+import com.service.garphrag.GraphRagRetriever;
+
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import com.dto.mq.InterviewPostProcessMessage;
+import com.dto.mq.InterviewPostProcessProduce;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 @Service
@@ -43,6 +54,10 @@ public class InterviewService {
         private final FlashcardService flashcardService;
         private final JsonParseService jsonParseService;
         private final KnowledgeGraphBuilder knowledgeGraphBuilder;
+        private final InterviewPostProcessProduce interviewPostProcessProduce;
+        private final InterviewMemoryCacheService interviewMemoryCacheService;
+        private final AiRateLimitService aiRateLimitService;
+        private final GraphRagRetriever graphRagRetriever;
 
         /**
          * 创建一场新的面试，并生成第一道问题
@@ -112,46 +127,57 @@ public class InterviewService {
                 validateText(answer, "回答内容不能为空");
                 assertSessionInProgress(userId, sessionId);
 
-                // 1. 保存用户回答
-                saveMessage(
-                                sessionId,
-                                ROLE_USER,
-                                "User",
-                                answer);
+                // 1. AI 调用限流：本接口会触发评分 Agent、追问决策 Agent、面试官 Agent。
+                // 超过每分钟 10 次时直接抛出业务异常，不再继续写入回答或调用 AI。
+                aiRateLimitService.checkLimit(userId);
 
-                // 2. 获取上一条 AI 问题
+                // 2. 从 Redis 获取最近 20 条短期上下文。
+                // Redis 命中时可减少 interview_message 表查询；Redis 未命中时再降级查 MySQL。
+                List<InterviewMessage> recentMessages = getRecentMessagesForPrompt(sessionId);
+
+                // 3. 获取上一条 AI 问题
                 // 因为评分需要知道：用户是在回答哪个问题
 
-                InterviewMessage lastAiQuestion = getLastAiMessage(sessionId);
+                InterviewMessage lastAiQuestion = getLastAiMessage(recentMessages);
+                if (lastAiQuestion == null) {
+                        recentMessages = getRecentMessagesFromDatabase(sessionId);
+                        lastAiQuestion = getLastAiMessage(recentMessages);
+                }
                 if (lastAiQuestion == null || isBlank(lastAiQuestion.getContent())) {
                         throw new BizException(ErrorCode.BAD_REQUEST, "当前面试没有可回答的AI问题");
                 }
                 String question = lastAiQuestion.getContent();
 
-                // 3. 调用 AgentOrchestrator：
-                // 评分 → 决策 → 生成追问/下一题
-                InterviewReplyDTO reply = agentOrchestrator.HandleAnswer(
-                                userId,
-                                topic,
-                                question,
+                // 4. 保存用户回答到 MySQL，并在事务提交后写入 Redis 短期记忆。
+                InterviewMessage userMessage = saveMessage(
+                                sessionId,
+                                ROLE_USER,
+                                "User",
                                 answer);
-                reply.setSessionId(sessionId);
-                // 4. 保存 AI 新问题 / 追问
-                if (reply == null || isBlank(reply.getContent())) {
-                        throw new BizException(ErrorCode.INTERNAL_ERROR, "AI未生成下一步回复");
-                }
-                if (isBlank(reply.getAction())) {
-                        reply.setAction(ACTION_NEXT);
-                }
 
+                // 5. 当前事务尚未提交，Redis 中还没有本次用户回答。
+                // 因此这里把刚保存的消息合并到内存上下文中，再传给 Agent Prompt。
+                List<InterviewMessage> promptMessages = appendMessageForPrompt(recentMessages, userMessage);
+                // GraphRAG Retrieval
+                List<String> graphRagContext = graphRagRetriever.retrieve(userId, question + "\n" + answer,
+                                GraphRagMode.AUTO);
+
+                // 6. 调用 AgentOrchestrator：
+                // 评分 → 决策 → 生成追问/下一题
+                OrchestratorResult result = agentOrchestrator.handleAnswerWithMultiAgentDecision(userId, sessionId,
+                                topic, question, answer, memoryService.getLatestProfileJson(userId),
+                                memoryService.getLatestSummaryMd(userId, "overall"), graphRagContext);
+                InterviewReplyDTO reply = new InterviewReplyDTO();
+                reply.setSessionId(sessionId);
+                // 7. 保存 AI 新问题 / 追问
+                reply.setAction(result.getAction());
+                reply.setContent(result.getContent());
+                reply.setScoreJson(result.getScoreJson());
                 saveMessage(
                                 sessionId,
-                                ROLE_AI,
-                                ACTION_FOLLOW_UP.equals(reply.getAction())
-                                                ? "FollowUpAgent"
-                                                : "TechInterviewerAgent",
+                                "ai",
+                                "MultiAgentOrchestrator",
                                 reply.getContent());
-
                 // 第一版先不单独保存 score 到 interview_score 表
                 // 后面可以把 reply.getScoreJson() 解析后写入评分表
 
@@ -203,28 +229,18 @@ public class InterviewService {
                         throw new BizException(ErrorCode.INTERNAL_ERROR, "AI未生成知识提炼结果");
                 }
 
-                // 4. json解析
-                KnowledgeExtractionResult extraction = jsonParseService.parseExtraction(extractionJson);
-                // 构建知识图谱
-                knowledgeGraphBuilder.buildGraph(
-                                userId,
-                                extraction);
-                // 5.更新长期记忆
-                memoryService.updateMemoryFromExtraction(
-                                userId,
-                                sessionId,
-                                extraction);
-                // 6. 自动生成闪卡
-                flashcardService.generateFlashcardsFromExtraction(
-                                userId,
-                                extraction);
-
                 InterviewSession session = new InterviewSession();
                 session.setId(sessionId);
                 session.setStatus(STATUS_FINISHED);
                 session.setSummary(extractionJson);
                 session.setEndedAt(LocalDateTime.now());
                 interviewSessionMapper.updateById(session);
+                // 4. 发送 MQ 消息，异步处理后续任务
+                InterviewPostProcessMessage message = new InterviewPostProcessMessage();
+                message.setUserId(userId);
+                message.setSessionId(sessionId);
+                message.setExtractionJson(extractionJson);
+                interviewPostProcessProduce.send(message);
                 return extractionJson;
         }
 
@@ -236,32 +252,19 @@ public class InterviewService {
                 validateText(topic, "面试主题不能为空");
                 validateText(answer, "回答内容不能为空");
 
-                String scoreInput = """
-                                问题主题：%s
+                // 旧版直接回答接口同样会调用 AI，因此复用同一个用户级限流规则。
+                aiRateLimitService.checkLimit(userId);
 
-                                用户回答：
-                                %s
-                                """.formatted(topic, answer);
-
-                String scoreResult = scoreAgent.score(scoreInput);
-
-                // 2️⃣ 决策
-                String decisionInput = """
-                                评分结果：
-                                %s
-                                """.formatted(scoreResult);
-
-                String decision = followUpAgent.decide(decisionInput);
-
-                if (decision.contains("FOLLOW_UP")) {
-                        return "继续追问：" + interviewerAgent.askQuestion(answer);
+                InterviewReplyDTO reply = agentOrchestrator.HandleAnswer(
+                                userId,
+                                topic,
+                                topic,
+                                answer);
+                if (reply == null || isBlank(reply.getContent())) {
+                        throw new BizException(ErrorCode.INTERNAL_ERROR, "AI未生成下一步回复");
                 }
 
-                if (decision.contains("HARDER")) {
-                        return "提高难度：" + interviewerAgent.askQuestion(topic + " 高级问题");
-                }
-
-                return "下一题：" + interviewerAgent.askQuestion(topic);
+                return reply.getContent();
         }
 
         /**
@@ -311,7 +314,7 @@ public class InterviewService {
          * @param agentCode Agent名称
          * @param content   内容
          */
-        public void saveMessage(Long sessionId, String role, String agentCode, String content) {
+        public InterviewMessage saveMessage(Long sessionId, String role, String agentCode, String content) {
                 validateRequired(sessionId, "面试ID不能为空");
                 validateText(role, "消息角色不能为空");
                 validateText(content, "消息内容不能为空");
@@ -322,21 +325,106 @@ public class InterviewService {
                 message.setAgentCode(agentCode);
                 message.setContent(content);
                 interviewMessageMapper.insert(message);
+
+                // MySQL 是最终持久化来源，Redis 是短期缓存。
+                // 为避免事务回滚后 Redis 中出现“数据库不存在”的脏消息，缓存写入延后到事务提交成功之后。
+                cacheMessageAfterCommit(sessionId, message);
+
+                return message;
         }
 
         /**
-         * 获取本场面试最后一条 AI 问题
+         * 从 Redis 读取最近上下文；未命中时降级查询 MySQL 最近 20 条。
          *
          * @param sessionId 面试ID
-         * @return 最后一条AI消息
+         * @return 最近 20 条面试消息，按时间从旧到新排列
          */
-        private InterviewMessage getLastAiMessage(Long sessionId) {
-                return interviewMessageMapper.selectOne(
+        private List<InterviewMessage> getRecentMessagesForPrompt(Long sessionId) {
+                List<InterviewMessage> cachedMessages = interviewMemoryCacheService.getRecentMessages(sessionId);
+                if (cachedMessages != null && !cachedMessages.isEmpty()) {
+                        return cachedMessages;
+                }
+
+                return getRecentMessagesFromDatabase(sessionId);
+        }
+
+        /**
+         * Redis 短期记忆未命中时的兜底查询。
+         *
+         * 这里只查询最近 20 条，而不是整场面试，避免退化成高成本全量上下文读取。
+         */
+        private List<InterviewMessage> getRecentMessagesFromDatabase(Long sessionId) {
+                List<InterviewMessage> messages = interviewMessageMapper.selectList(
                                 new LambdaQueryWrapper<InterviewMessage>()
                                                 .eq(InterviewMessage::getSessionId, sessionId)
-                                                .eq(InterviewMessage::getRole, "ai")
                                                 .orderByDesc(InterviewMessage::getId)
-                                                .last("LIMIT 1"));
+                                                .last("LIMIT 20"));
+                if (messages == null || messages.isEmpty()) {
+                        return Collections.emptyList();
+                }
+
+                List<InterviewMessage> orderedMessages = new ArrayList<>(messages);
+                Collections.reverse(orderedMessages);
+                return orderedMessages;
+        }
+
+        /**
+         * 从一组最近上下文中找到最后一条 AI 消息。
+         *
+         * @param messages 最近面试上下文
+         * @return 最后一条AI消息
+         */
+        private InterviewMessage getLastAiMessage(List<InterviewMessage> messages) {
+                if (messages == null || messages.isEmpty()) {
+                        return null;
+                }
+
+                for (int index = messages.size() - 1; index >= 0; index--) {
+                        InterviewMessage message = messages.get(index);
+                        if (message != null && ROLE_AI.equals(message.getRole())) {
+                                return message;
+                        }
+                }
+                return null;
+        }
+
+        /**
+         * 构造传给 Agent Prompt 的最近上下文。
+         *
+         * saveMessage 会在事务提交后才写 Redis，所以当前用户回答需要先放入内存列表，
+         * 这样本轮评分、追问决策和下一题生成都能看到最新回答。
+         */
+        private List<InterviewMessage> appendMessageForPrompt(
+                        List<InterviewMessage> recentMessages,
+                        InterviewMessage message) {
+                List<InterviewMessage> promptMessages = new ArrayList<>();
+                if (recentMessages != null) {
+                        promptMessages.addAll(recentMessages);
+                }
+                promptMessages.add(message);
+
+                if (promptMessages.size() <= 20) {
+                        return promptMessages;
+                }
+
+                return new ArrayList<>(promptMessages.subList(promptMessages.size() - 20, promptMessages.size()));
+        }
+
+        /**
+         * 事务提交成功后再写 Redis，保证短期记忆不会领先于 MySQL 持久化状态。
+         */
+        private void cacheMessageAfterCommit(Long sessionId, InterviewMessage message) {
+                if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+                        interviewMemoryCacheService.cacheMessage(sessionId, message);
+                        return;
+                }
+
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                                interviewMemoryCacheService.cacheMessage(sessionId, message);
+                        }
+                });
         }
 
         private InterviewSession assertSessionInProgress(Long userId, Long sessionId) {

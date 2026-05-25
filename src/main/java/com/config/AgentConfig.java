@@ -2,7 +2,10 @@ package com.config;
 
 import com.ai.agent.TechInterviewerAgent;
 import com.ai.agent.ScoreAgent;
+import com.ai.agent.CommunityReportAgent;
+import com.ai.agent.DriftQuestionAgent;
 import com.ai.agent.FollowUpAgent;
+import com.ai.agent.GraphExtractionAgent;
 import com.ai.agent.KnowledgeExtractorAgent;
 import com.ai.agent.ResumeProfileAgent;
 
@@ -38,4 +41,18 @@ public class AgentConfig {
         return AiServices.create(ResumeProfileAgent.class, model);
     }
 
+    @Bean
+    public GraphExtractionAgent graphExtractionAgent(ChatLanguageModel model) {
+        return AiServices.create(GraphExtractionAgent.class, model);
+    }
+
+    @Bean
+    public CommunityReportAgent CommunityReportAgent(ChatLanguageModel model) {
+        return AiServices.create(CommunityReportAgent.class, model);
+    }
+
+    @Bean
+    public DriftQuestionAgent DriftQuestionAgent(ChatLanguageModel model) {
+        return AiServices.create(DriftQuestionAgent.class, model);
+    }
 }

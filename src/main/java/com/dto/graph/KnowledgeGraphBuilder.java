@@ -4,8 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.dto.extraction.KnowledgeExtractionResult;
 import com.dto.extraction.StrengthDTO;
 import com.dto.extraction.WeaknessDTO;
-import com.entity.KnowledgeNode;
-import com.entity.KnowledgeRelation;
+import com.entity.graphrag.GraphRagEntity;
+import com.entity.graphrag.GraphRagRelationship;
 import com.mapper.KnowledgeNodeMapper;
 import com.mapper.KnowledgeRelationMapper;
 import lombok.RequiredArgsConstructor;
@@ -30,10 +30,10 @@ public class KnowledgeGraphBuilder {
   private final KnowledgeRelationMapper knowledgeRelationMapper;
 
   public void buildGraph(Long userId, KnowledgeExtractionResult extraction) {
-    List<KnowledgeNode> allNode = new ArrayList<>();
+    List<GraphRagEntity> allNode = new ArrayList<>();
     if (extraction.getStrengths() != null) {
       for (StrengthDTO strength : extraction.getStrengths()) {
-        KnowledgeNode node = createOrUpdateNode(userId, strength.getName(), "TECH", 80, 70);
+        GraphRagEntity node = createOrUpdateNode(userId, strength.getName(), "TECH", 80, 70);
         allNode.add(node);
       }
     }
@@ -43,7 +43,7 @@ public class KnowledgeGraphBuilder {
             10,
             100 - weakness.getLevel() * 20);
 
-        KnowledgeNode node = createOrUpdateNode(
+        GraphRagEntity node = createOrUpdateNode(
             userId,
             weakness.getName(),
             "TECH",
@@ -56,12 +56,12 @@ public class KnowledgeGraphBuilder {
     buildRelation(userId, allNode);
   }
 
-  private KnowledgeNode createOrUpdateNode(Long userId, String name, String type, Integer mastery, Integer importance) {
+  private GraphRagEntity createOrUpdateNode(Long userId, String name, String type, Integer mastery, Integer importance) {
     // 查询是否已存在
-    KnowledgeNode exist = knowledgeNodeMapper.selectOne(
-        new LambdaQueryWrapper<KnowledgeNode>()
-            .eq(KnowledgeNode::getUserId, userId)
-            .eq(KnowledgeNode::getTitle, name)
+    GraphRagEntity exist = knowledgeNodeMapper.selectOne(
+        new LambdaQueryWrapper<GraphRagEntity>()
+            .eq(GraphRagEntity::getUserId, userId)
+            .eq(GraphRagEntity::getName, name)
             .last("LIMIT 1"));
     // 已存在 → 更新
     if (exist != null) {
@@ -70,9 +70,9 @@ public class KnowledgeGraphBuilder {
           safeInt(exist.getOccurrenceCount()) + 1);
 
       // 取较低掌握度（保守策略）
-      exist.setMasteryLevel(
+      exist.setImportanceScore(
           Math.min(
-              safeInt(exist.getMasteryLevel()),
+              safeInt(exist.getImportanceScore()),
               mastery));
 
       knowledgeNodeMapper.updateById(exist);
@@ -81,12 +81,11 @@ public class KnowledgeGraphBuilder {
     }
 
     // 不存在 → 创建
-    KnowledgeNode node = new KnowledgeNode();
+    GraphRagEntity node = new GraphRagEntity();
 
     node.setUserId(userId);
-    node.setTitle(name);
-    node.setNodeType(type);
-    node.setMasteryLevel(mastery);
+    node.setName(name);
+    node.setType(type);
     node.setImportanceScore(importance);
     node.setOccurrenceCount(1);
 
@@ -98,7 +97,7 @@ public class KnowledgeGraphBuilder {
   /**
    * 自动建立知识关系
    */
-  private void buildRelation(Long userId, List<KnowledgeNode> nodes) {
+  private void buildRelation(Long userId, List<GraphRagEntity> nodes) {
     if (nodes.size() < 2) {
       return;
     }
@@ -106,9 +105,9 @@ public class KnowledgeGraphBuilder {
 
       for (int j = i + 1; j < nodes.size(); j++) {
 
-        KnowledgeNode source = nodes.get(i);
+        GraphRagEntity source = nodes.get(i);
 
-        KnowledgeNode target = nodes.get(j);
+        GraphRagEntity target = nodes.get(j);
 
         // 避免重复关系
         boolean exists = relationExists(
@@ -119,14 +118,14 @@ public class KnowledgeGraphBuilder {
           continue;
         }
 
-        KnowledgeRelation relation = new KnowledgeRelation();
+        GraphRagRelationship relation = new GraphRagRelationship();
 
         relation.setUserId(userId);
 
-        relation.setSourceNodeId(
+        relation.setSourceEntityId(
             source.getId());
 
-        relation.setTargetNodeId(
+        relation.setTargetEntityId(
             target.getId());
 
         relation.setRelationType(
@@ -144,12 +143,12 @@ public class KnowledgeGraphBuilder {
       Long targetId) {
 
     Long count = knowledgeRelationMapper.selectCount(
-        new LambdaQueryWrapper<KnowledgeRelation>()
+        new LambdaQueryWrapper<GraphRagRelationship>()
             .eq(
-                KnowledgeRelation::getSourceNodeId,
+                GraphRagRelationship::getSourceEntityId,
                 sourceId)
             .eq(
-                KnowledgeRelation::getTargetNodeId,
+                GraphRagRelationship::getTargetEntityId,
                 targetId));
 
     return count > 0;

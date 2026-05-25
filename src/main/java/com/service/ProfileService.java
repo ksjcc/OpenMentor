@@ -2,6 +2,9 @@ package com.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ai.agent.ResumeProfileAgent;
+import com.ai.prompt.PromptBuilder;
+import com.ai.prompt.PromptContext;
+import com.ai.prompt.PromptTemplates;
 import com.dto.profile.ProfileInitRequest;
 import com.entity.UserProfile;
 import com.mapper.UserProfileMapper;
@@ -24,6 +27,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class ProfileService {
     private final ResumeProfileAgent resumeProfileAgent;
+    private final PromptBuilder promptBuilder;
     private final UserProfileMapper userProfileMapper;
     private final MemoryService memoryService;
     private final ObjectMapper objectMapper;
@@ -39,14 +43,12 @@ public class ProfileService {
      * @return AI解析后的画像JSON
      */
     public String initProfile(ProfileInitRequest request) {
-        String agentInput = """
-                用户目标岗位：%s
-
-                用户简历/项目经历：
-                %s
-                """.formatted(
-                request.getTargetRole(),
-                request.getResumeText());
+        String agentInput = promptBuilder.buildProfilePrompt(PromptContext.builder()
+                .userId(request.getUserId())
+                .targetRole(request.getTargetRole())
+                .resumeText(request.getResumeText())
+                .task(PromptTemplates.TASK_PROFILE)
+                .build());
 
         String profileJson = resumeProfileAgent.parseProfile(agentInput);
         saveOrUpdateUserProfile(request.getUserId(), profileJson);
