@@ -33,6 +33,18 @@ public class RabbitMQConfig {
   public Queue interviewPostProcessQueue() {
     return QueueBuilder
         .durable(RabbitMQConstants.INTERVIEW_POST_PROCESS_QUEUE)
+        .deadLetterExchange(RabbitMQConstants.INTERVIEW_EXCHANGE)
+        .deadLetterRoutingKey(RabbitMQConstants.INTERVIEW_POST_PROCESS_DLQ_ROUTING_KEY)
+        .build();
+  }
+
+  /**
+   * 面试后处理死信队列
+   */
+  @Bean
+  public Queue interviewPostProcessDeadLetterQueue() {
+    return QueueBuilder
+        .durable(RabbitMQConstants.INTERVIEW_POST_PROCESS_DLQ)
         .build();
   }
 
@@ -45,6 +57,17 @@ public class RabbitMQConfig {
         .bind(interviewPostProcessQueue())
         .to(interviewExchange())
         .with(RabbitMQConstants.INTERVIEW_POST_PROCESS_ROUTING_KEY);
+  }
+
+  /**
+   * 绑定死信队列到交换机
+   */
+  @Bean
+  public Binding interviewPostProcessDeadLetterBinding() {
+    return BindingBuilder
+        .bind(interviewPostProcessDeadLetterQueue())
+        .to(interviewExchange())
+        .with(RabbitMQConstants.INTERVIEW_POST_PROCESS_DLQ_ROUTING_KEY);
   }
 
   /**

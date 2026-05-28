@@ -1,5 +1,7 @@
 package com.dto;
 
+import java.util.Map;
+
 import lombok.Data;
 
 /**
@@ -17,5 +19,7 @@ public class InterviewReplyDTO {
   private String content;
   private String action;
   private String scoreJson;
+  private Map<String, Long> stageLatencyMs;
+  private Long totalLatencyMs;
 
 }

@@ -13,4 +13,8 @@ public class StrengthDTO {
    * AI提炼依据
    */
   private String evidence;
+  private Integer occurrenceCount;
+  private String source;
+  private String updatedAt;
+  private Double confidence;
 }

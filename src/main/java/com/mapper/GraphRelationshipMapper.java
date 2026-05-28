@@ -20,6 +20,15 @@ public interface GraphRelationshipMapper extends BaseMapper<GraphRagRelationship
 
   @Select("""
       SELECT *
+      FROM graph_rag_relationship
+      WHERE source_entity_id = #{entityId}
+      OR target_entity_id = #{entityId}
+      """)
+  List<GraphRagRelationship> selectByEntityId(
+      @Param("entityId") Long entityId);
+
+  @Select("""
+      SELECT *
       FROM graph_relationship
       WHERE user_id = #{userId}
         AND (source_entity_id = #{entityId} OR target_entity_id = #{entityId})

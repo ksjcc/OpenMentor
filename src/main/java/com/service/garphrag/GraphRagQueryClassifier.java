@@ -47,7 +47,7 @@ public class GraphRagQueryClassifier {
     }
 
     plan.setQueryType(GraphRagQueryType.SIMPLE_FACT);
-    plan.setMode(realTime ? GraphRagMode.LOCAL : GraphRagMode.AUTO);
+    plan.setMode(GraphRagMode.LOCAL);
     plan.setReason("未命中特殊规则，使用轻量检索。");
 
     return plan;

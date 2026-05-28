@@ -1,6 +1,8 @@
 package com.ai.orchestrator;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import com.dto.decision.AgentDecisionDTO;
 
@@ -37,4 +39,14 @@ public class OrchestratorResult {
    * 各 Agent / 模块建议
    */
   private List<AgentDecisionDTO> agentDecisions;
+
+  /**
+   * 编排链路各阶段耗时（毫秒）
+   */
+  private Map<String, Long> stageLatencyMs = new LinkedHashMap<>();
+
+  /**
+   * 编排链路总耗时（毫秒）
+   */
+  private long totalLatencyMs;
 }

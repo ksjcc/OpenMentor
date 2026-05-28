@@ -7,6 +7,8 @@ import com.dto.dashboard.DashboardDTO;
 import com.dto.dashboard.RecentInterviewDTO;
 import com.dto.dashboard.SkillRadarDTO;
 import com.dto.dashboard.WeaknessRankDTO;
+import com.dto.extraction.KnowledgeExtractionResult;
+import com.dto.extraction.WeaknessDTO;
 import com.entity.Flashcard;
 import com.entity.InterviewSession;
 import com.entity.MemoryProfileJson;
@@ -22,8 +24,10 @@ import lombok.RequiredArgsConstructor;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Dashboard 服务
@@ -38,6 +42,9 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 public class DashboardService {
+  private static final String STATUS_FINISHED = "FINISHED";
+  private static final int MAX_RECENT_SUMMARIES = 10;
+
   private final MemoryProfileJsonMapper memoryProfileJsonMapper;
   private final UserProfileMapper userProfileMapper;
   private final InterviewSessionMapper interviewSessionMapper;
@@ -82,10 +89,11 @@ public class DashboardService {
   private List<SkillRadarDTO> buildSkills(Long userId) {
 
     List<SkillRadarDTO> list = new ArrayList<>();
+    Map<String, Integer> weaknessPenalty = buildWeaknessPenaltyMap(userId);
 
     UserProfile userProfile = getUserProfile(userId);
     if (userProfile != null && !isBlank(userProfile.getAbilityMap())) {
-      appendAbilityMapSkills(list, userProfile.getAbilityMap());
+      appendAbilityMapSkills(list, userProfile.getAbilityMap(), weaknessPenalty);
       if (!list.isEmpty()) {
         return list;
       }
@@ -110,7 +118,7 @@ public class DashboardService {
         abilityMap.fields().forEachRemaining(field -> {
           SkillRadarDTO dto = new SkillRadarDTO();
           dto.setSkill(field.getKey());
-          dto.setScore(field.getValue().asInt(0));
+          dto.setScore(applyWeaknessPenalty(field.getKey(), field.getValue().asInt(0), weaknessPenalty));
           list.add(dto);
         });
         return list;
@@ -122,12 +130,10 @@ public class DashboardService {
         for (JsonNode node : techStack) {
 
           SkillRadarDTO dto = new SkillRadarDTO();
+          String skill = node.asText();
 
-          dto.setSkill(node.asText());
-
-          // 第一版随机给分
-          // 后面根据面试得分动态计算
-          dto.setScore(60);
+          dto.setSkill(skill);
+          dto.setScore(inferTechStackScore(skill, weaknessPenalty));
 
           list.add(dto);
         }
@@ -187,13 +193,29 @@ public class DashboardService {
    * AI建议
    */
   private List<String> buildSuggestions(Long userId) {
+    List<String> suggestions = new ArrayList<>();
+    List<WeaknessRankDTO> weaknesses = buildWeaknesses(userId);
 
-    List<String> list = new ArrayList<>();
+    if (!weaknesses.isEmpty()) {
+      WeaknessRankDTO top1 = weaknesses.get(0);
+      suggestions.add("优先针对“" + top1.getName() + "”安排专项复习，近期出现 " + top1.getCount() + " 次。");
+      if (weaknesses.size() > 1) {
+        WeaknessRankDTO top2 = weaknesses.get(1);
+        suggestions.add("把“" + top2.getName() + "”和高频面试题结合复盘，尽快补齐第二短板。");
+      }
+    }
 
-    list.add("建议加强 Redis 缓存一致性。");
-    list.add("建议复习 JVM GC 与内存模型。");
+    List<InterviewSession> sessions = getRecentFinishedSessions(userId, 3);
+    if (!sessions.isEmpty()) {
+      String latestRole = firstNonBlank(sessions.get(0).getTargetRole(), "当前目标岗位");
+      suggestions.add("结合最近的 " + latestRole + " 面试记录，重点整理高频追问与标准表达。");
+    }
 
-    return list;
+    if (suggestions.isEmpty()) {
+      suggestions.add("继续完成至少一场模拟面试，系统会基于真实答题表现生成成长建议。");
+    }
+
+    return suggestions.stream().distinct().limit(3).toList();
   }
 
   /**
@@ -204,51 +226,34 @@ public class DashboardService {
    */
   private List<WeaknessRankDTO> buildWeaknesses(Long userId) {
 
-    List<WeaknessRankDTO> list = new ArrayList<>();
+    Map<String, Integer> aggregated = new LinkedHashMap<>();
 
     UserProfile profile = getUserProfile(userId);
     if (profile != null && !isBlank(profile.getWeaknesses())) {
-      try {
-        JsonNode weaknesses = objectMapper.readTree(profile.getWeaknesses());
-        if (weaknesses.isArray()) {
-          for (JsonNode node : weaknesses) {
-            String name = node.path("name").asText("");
-            if (isBlank(name)) {
-              continue;
-            }
-
-            WeaknessRankDTO dto = new WeaknessRankDTO();
-            dto.setName(name);
-            dto.setCount(node.path("occurrenceCount").asInt(1));
-            list.add(dto);
-          }
-
-          list.sort(Comparator.comparing(WeaknessRankDTO::getCount).reversed());
-          return list;
-        }
-      } catch (Exception e) {
-        e.printStackTrace();
-      }
+      appendWeaknessesFromProfile(aggregated, profile.getWeaknesses());
     }
 
-    WeaknessRankDTO dto1 = new WeaknessRankDTO();
+    for (InterviewSession session : getRecentFinishedSessions(userId, MAX_RECENT_SUMMARIES)) {
+      appendWeaknessesFromSummary(aggregated, session.getSummary());
+    }
 
-    dto1.setName("Redis缓存一致性");
-    dto1.setCount(5);
-
-    list.add(dto1);
-
-    WeaknessRankDTO dto2 = new WeaknessRankDTO();
-
-    dto2.setName("JVM GC");
-    dto2.setCount(3);
-
-    list.add(dto2);
-
-    return list;
+    return aggregated.entrySet().stream()
+        .sorted(Map.Entry.<String, Integer>comparingByValue().reversed()
+            .thenComparing(Map.Entry::getKey))
+        .limit(5)
+        .map(entry -> {
+          WeaknessRankDTO dto = new WeaknessRankDTO();
+          dto.setName(entry.getKey());
+          dto.setCount(entry.getValue());
+          return dto;
+        })
+        .toList();
   }
 
-  private void appendAbilityMapSkills(List<SkillRadarDTO> list, String abilityMapJson) {
+  private void appendAbilityMapSkills(
+      List<SkillRadarDTO> list,
+      String abilityMapJson,
+      Map<String, Integer> weaknessPenalty) {
     try {
       JsonNode abilityMap = objectMapper.readTree(abilityMapJson);
       if (!abilityMap.isObject()) {
@@ -258,12 +263,110 @@ public class DashboardService {
       abilityMap.fields().forEachRemaining(field -> {
         SkillRadarDTO dto = new SkillRadarDTO();
         dto.setSkill(field.getKey());
-        dto.setScore(field.getValue().asInt(0));
+        dto.setScore(applyWeaknessPenalty(field.getKey(), field.getValue().asInt(0), weaknessPenalty));
         list.add(dto);
       });
     } catch (Exception e) {
       e.printStackTrace();
     }
+  }
+
+  private void appendWeaknessesFromProfile(Map<String, Integer> aggregated, String weaknessesJson) {
+    try {
+      JsonNode weaknesses = objectMapper.readTree(weaknessesJson);
+      if (!weaknesses.isArray()) {
+        return;
+      }
+
+      for (JsonNode node : weaknesses) {
+        String name = normalizeWeaknessName(node.path("name").asText(""));
+        if (name == null) {
+          continue;
+        }
+        int count = node.path("occurrenceCount").asInt(1);
+        aggregated.merge(name, Math.max(1, count), Integer::sum);
+      }
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+  }
+
+  private void appendWeaknessesFromSummary(Map<String, Integer> aggregated, String summaryJson) {
+    if (isBlank(summaryJson)) {
+      return;
+    }
+
+    try {
+      KnowledgeExtractionResult extraction = objectMapper.readValue(summaryJson, KnowledgeExtractionResult.class);
+      if (extraction.getWeaknesses() == null) {
+        return;
+      }
+
+      for (WeaknessDTO weakness : extraction.getWeaknesses()) {
+        String name = normalizeWeaknessName(weakness.getName());
+        if (name == null) {
+          continue;
+        }
+        int weight = weakness.getLevel() == null ? 1 : Math.max(1, weakness.getLevel());
+        aggregated.merge(name, weight, Integer::sum);
+      }
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+  }
+
+  private Map<String, Integer> buildWeaknessPenaltyMap(Long userId) {
+    Map<String, Integer> penalty = new LinkedHashMap<>();
+    for (WeaknessRankDTO weakness : buildWeaknesses(userId)) {
+      if (weakness == null || isBlank(weakness.getName())) {
+        continue;
+      }
+      penalty.put(weakness.getName(), weakness.getCount());
+    }
+    return penalty;
+  }
+
+  private int applyWeaknessPenalty(String skill, int baseScore, Map<String, Integer> weaknessPenalty) {
+    int score = clampScore(baseScore);
+    if (isBlank(skill) || weaknessPenalty.isEmpty()) {
+      return score;
+    }
+
+    int penalty = 0;
+    for (Map.Entry<String, Integer> entry : weaknessPenalty.entrySet()) {
+      if (skill.contains(entry.getKey()) || entry.getKey().contains(skill)) {
+        penalty = Math.max(penalty, Math.min(entry.getValue() * 5, 25));
+      }
+    }
+    return clampScore(score - penalty);
+  }
+
+  private int inferTechStackScore(String skill, Map<String, Integer> weaknessPenalty) {
+    return applyWeaknessPenalty(skill, 75, weaknessPenalty);
+  }
+
+  private int clampScore(int score) {
+    return Math.max(0, Math.min(100, score));
+  }
+
+  private String normalizeWeaknessName(String name) {
+    if (isBlank(name)) {
+      return null;
+    }
+    return name.trim();
+  }
+
+  private List<InterviewSession> getRecentFinishedSessions(Long userId, int limit) {
+    return interviewSessionMapper.selectList(
+        new LambdaQueryWrapper<InterviewSession>()
+            .eq(InterviewSession::getUserId, userId)
+            .eq(InterviewSession::getStatus, STATUS_FINISHED)
+            .orderByDesc(InterviewSession::getId)
+            .last("LIMIT " + limit));
+  }
+
+  private String firstNonBlank(String value, String fallback) {
+    return isBlank(value) ? fallback : value;
   }
 
   private UserProfile getUserProfile(Long userId) {

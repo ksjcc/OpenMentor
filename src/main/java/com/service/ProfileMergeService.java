@@ -6,7 +6,10 @@ import com.common.ErrorCode;
 import com.dto.extraction.KnowledgeExtractionResult;
 import com.dto.extraction.StrengthDTO;
 import com.dto.extraction.WeaknessDTO;
+import com.dto.profile.ProfileFieldPatchDTO;
+import com.dto.profile.ProfileUpdatePatchDTO;
 import com.entity.MemoryProfileJson;
+import com.entity.ProfileMergeMode;
 import com.entity.UserProfile;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -88,6 +91,46 @@ public class ProfileMergeService {
     }
   }
 
+  private void mergeByPolicy(MemoryProfileJson profile, String field, Object oldValue, Object newValue) {
+    ProfileMergeMode mode = ProfileMergeRules.getMode(field);
+    switch (mode) {
+      case INIT_ONLY -> {
+      }
+      case EXPLICIT_OVERRIDE -> {
+        if (newValue != null) {
+          applyOverride(
+              profile,
+              field,
+              newValue);
+        }
+      }
+
+      case UNION_BY_NAME -> {
+        mergeCollectionField(
+            profile,
+            field,
+            oldValue,
+            newValue);
+      }
+
+      case CONFIDENCE_WEIGHTED_SCORE -> {
+        mergeAbilityField(
+            profile,
+            oldValue,
+            newValue);
+      }
+
+      case APPEND_EVIDENCE -> {
+        appendEvidence(
+            profile,
+            field,
+            newValue);
+      }
+    }
+  }
+
+  }
+
   private void mergeStrengths(ObjectNode profile, KnowledgeExtractionResult extraction) {
     if (extraction.getStrengths() == null) {
       return;
@@ -136,18 +179,304 @@ public class ProfileMergeService {
     }
 
     String profileUpdate = extraction.getMemory().getProfileUpdate();
+
     try {
-      JsonNode update = objectMapper.readTree(profileUpdate);
-      if (!update.isObject()) {
-        profile.put("lastProfileUpdate", profileUpdate);
+
+      ProfileUpdatePatchDTO patch = objectMapper.readValue(
+          profileUpdate,
+          ProfileUpdatePatchDTO.class);
+
+      applyPatch(
+          profile,
+          patch);
+
+    } catch (Exception e) {
+
+      // fallback 老格式兼容
+      try {
+
+        JsonNode update = objectMapper.readTree(
+            profileUpdate);
+
+        if (update.isObject()) {
+
+          mergeExplicitAbilityMap(
+              profile,
+              update.get(
+                  "abilityMap"));
+
+          mergeExplicitNamedArray(
+              profile,
+              "strengths",
+              update.get(
+                  "strengths"));
+
+          mergeExplicitNamedArray(
+              profile,
+              "weaknesses",
+              update.get(
+                  "weaknesses"));
+        }
+
+      } catch (Exception ignored) {
+
+        profile.put(
+            "lastProfileUpdate",
+            profileUpdate);
+      }
+    }
+  }
+
+  private void applyPatch(
+      ObjectNode profile,
+      ProfileUpdatePatchDTO patch) {
+
+    if (patch == null
+        || patch.getUpdates() == null) {
+      return;
+    }
+
+    for (ProfileFieldPatchDTO u : patch.getUpdates()) {
+
+      if (u == null
+          || isBlank(
+              u.getField())
+          || isBlank(
+              u.getOp())) {
+        continue;
+      }
+
+      switch (u.getField()) {
+
+        case "abilityMap" ->
+          applyAbilityPatch(
+              profile,
+              u);
+
+        case "techStack" ->
+          applyTechStackPatch(
+              profile,
+              u);
+
+        case "targetRole",
+            "experienceLevel",
+            "learningPreference" ->
+          applyScalarPatch(
+              profile,
+              u);
+
+        default -> {
+        }
+      }
+    }
+  }
+
+  private void applyScalarPatch(
+      ObjectNode profile,
+      ProfileFieldPatchDTO patch) {
+
+    if (!"replace".equalsIgnoreCase(
+        patch.getOp())
+        || isBlank(
+            patch.getValue())) {
+      return;
+    }
+
+    String field = patch.getField();
+
+    ProfileMergeMode mode = ProfileMergeRules.getMode(
+        field);
+
+    switch (mode) {
+
+      case INIT_ONLY -> {
         return;
       }
 
-      mergeExplicitAbilityMap(profile, update.get("abilityMap"));
-      mergeExplicitNamedArray(profile, "strengths", update.get("strengths"));
-      mergeExplicitNamedArray(profile, "weaknesses", update.get("weaknesses"));
-    } catch (Exception e) {
-      profile.put("lastProfileUpdate", profileUpdate);
+      case EXPLICIT_OVERRIDE -> {
+
+        double confidence = patch.getConfidence() == null
+            ? 0.0
+            : patch.getConfidence();
+
+        if (confidence < 0.8) {
+          return;
+        }
+
+        String oldValue = profile.path(field)
+            .asText("");
+
+        if (isBlank(oldValue)) {
+
+          profile.put(
+              field,
+              patch.getValue());
+
+          profile.put(
+              field + "UpdatedAt",
+              LocalDateTime.now()
+                  .toString());
+
+        } else if (!oldValue.equals(
+            patch.getValue())) {
+
+          profile.put(
+              field,
+              patch.getValue());
+
+          profile.put(
+              field + "UpdatedAt",
+              LocalDateTime.now()
+                  .toString());
+
+          profile.put(
+              field + "Confidence",
+              confidence);
+
+          if (!isBlank(
+              patch.getEvidence())) {
+
+            profile.put(
+                field + "Evidence",
+                patch.getEvidence());
+          }
+        }
+      }
+
+      default -> {
+      }
+    }
+  }
+
+  private void applyTechStackPatch(ObjectNode profile, ProfileFieldPatchDTO patch) {
+    if (!"add".equalsIgnoreCase(
+        patch.getOp())
+        || isBlank(
+            patch.getValue())) {
+      return;
+    }
+    ArrayNode techStack = ensureArray(profile, "techStack");
+    String normalized = normalize(patch.getValue());
+    boolean exists = false;
+    for (JsonNode item : techStack) {
+      String old = item.isTextual() ? item.asText() : item.path("name").asText();
+      if (normalized.equals(old)) {
+        exists = true;
+        break;
+      }
+    }
+    if (!exists) {
+
+      ObjectNode node = objectMapper.createObjectNode();
+
+      node.put(
+          "name",
+          patch.getValue());
+
+      node.put(
+          "source",
+          "profile_patch");
+
+      node.put(
+          "updatedAt",
+          LocalDateTime.now()
+              .toString());
+
+      if (patch.getConfidence() != null) {
+
+        node.put(
+            "confidence",
+            patch.getConfidence());
+      }
+
+      if (!isBlank(
+          patch.getEvidence())) {
+
+        node.put(
+            "evidence",
+            patch.getEvidence());
+      }
+
+      techStack.add(node);
+    }
+  }
+
+  private void applyAbilityPatch(
+      ObjectNode profile,
+      ProfileFieldPatchDTO patch) {
+
+    if (!"adjust".equals(
+        patch.getOp())
+        || isBlank(
+            patch.getName())
+        || patch.getDelta() == null) {
+      return;
+    }
+
+    ObjectNode abilityMap = ensureObject(
+        profile,
+        "abilityMap");
+
+    int oldScore = abilityMap.path(
+        patch.getName())
+        .asInt(
+            DEFAULT_ABILITY_SCORE);
+
+    double confidence = patch.getConfidence() == null
+        ? 0.7
+        : patch.getConfidence();
+
+    int delta = (int) Math.round(
+        patch.getDelta()
+            * confidence);
+
+    delta = Math.max(
+        -12,
+        Math.min(
+            12,
+            delta));
+
+    abilityMap.put(
+        patch.getName(),
+        clamp(
+            oldScore
+                + delta));
+  }
+
+  private void mergeScalarField(
+      ObjectNode profile,
+      String field,
+      JsonNode node) {
+
+    if (node == null
+        || node.isNull()
+        || isBlank(node.asText())) {
+      return;
+    }
+
+    ProfileMergeMode mode = ProfileMergeRules.getMode(
+        field);
+
+    switch (mode) {
+
+      case INIT_ONLY -> {
+      }
+
+      case EXPLICIT_OVERRIDE -> {
+
+        if (!profile.has(field)
+            || isBlank(
+                profile.path(field)
+                    .asText())) {
+
+          profile.put(
+              field,
+              node.asText());
+        }
+      }
+
+      default -> {
+      }
     }
   }
 
@@ -160,10 +489,33 @@ public class ProfileMergeService {
     Iterator<Map.Entry<String, JsonNode>> fields = updateAbilityMap.fields();
     while (fields.hasNext()) {
       Map.Entry<String, JsonNode> field = fields.next();
-      if (!isBlank(field.getKey()) && field.getValue().isNumber()) {
-        abilityMap.put(field.getKey(), clamp(field.getValue().asInt()));
+      if (isBlank(field.getKey()) && !field.getValue().isNumber()) {
+        continue;
       }
+      int observedScore = field.getValue().asInt();
+      int oldScore = abilityMap.path(field.getKey()).asInt(DEFAULT_ABILITY_SCORE);
+      int merged = smoothScore(
+          oldScore,
+          observedScore);
+
+      abilityMap.put(
+          field.getKey(),
+          merged);
     }
+  }
+
+  private int smoothScore(
+      int oldScore,
+      int observedScore) {
+
+    double score = oldScore * 0.8
+        + observedScore * 0.2;
+
+    return Math.max(
+        0,
+        Math.min(
+            100,
+            (int) Math.round(score)));
   }
 
   private void mergeExplicitNamedArray(ObjectNode profile, String fieldName, JsonNode updateArray) {
@@ -274,11 +626,29 @@ public class ProfileMergeService {
     profile.setUserId(userId);
     profile.setTargetRole(text(profileJson, "targetRole"));
     profile.setExperienceLevel(text(profileJson, "experienceLevel"));
+    profile.setLearningPreference(text(profileJson, "learningPreference"));
+    /*
+     * mergeByPolicy(profile,
+     * "targetRole",
+     * profile.getTargetRole(),
+     * update.getTargetRole());
+     * 
+     * mergeByPolicy(
+     * profile,
+     * "experienceLevel",
+     * profile.getExperienceLevel(),
+     * update.getExperienceLevel());
+     * 
+     * mergeByPolicy(
+     * profile,
+     * "learningPreference",
+     * profile.getLearningPreference(),
+     * update.getLearningPreference());
+     */
     profile.setTechStack(json(profileJson, "techStack", "[]"));
     profile.setAbilityMap(json(profileJson, "abilityMap", "{}"));
     profile.setWeaknesses(json(profileJson, "weaknesses", "[]"));
     profile.setStrengths(json(profileJson, "strengths", "[]"));
-    profile.setLearningPreference(text(profileJson, "learningPreference"));
 
     if (old == null) {
       userProfileMapper.insert(profile);

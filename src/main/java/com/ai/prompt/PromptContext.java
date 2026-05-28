@@ -105,4 +105,9 @@ public class PromptContext {
    * Knowledge Graph 推理结果
    */
   private String graphReasoning;
+
+  /**
+   * GraphRAG / 其他扩展任务的原始输入
+   */
+  private String rawInput;
 }

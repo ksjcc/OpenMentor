@@ -25,6 +25,7 @@ public class HybridRetriever {
 
     private final VectorStoreService vectorStoreService;
     private final MemoryService memoryService;
+    private final HydeQueryExpansionService hydeQueryExpansionService;
 
     /**
      * 检索用户相关记忆
@@ -36,13 +37,11 @@ public class HybridRetriever {
      */
     public List<String> retrieve(Long userId, String query, int limit) {
         List<String> result = new ArrayList<>();
-        // 关键词检索
-        List<MemoryChunk> keywordChunks = memoryService.searchRelevantChunks(userId, query, limit);
-        for (MemoryChunk chunk : keywordChunks) {
-            result.add(chunk.getContent());
-        }
-        // 向量检索
-        List<String> vectorResults = vectorStoreService.search(userId, query, limit);
+
+        String hydeQuery = hydeQueryExpansionService
+                .expand(query);
+
+        List<String> vectorResults = vectorStoreService.search(userId, hydeQuery, limit);
         result.addAll(vectorResults);
         // 合并去重
         return new LinkedHashSet<>(result)

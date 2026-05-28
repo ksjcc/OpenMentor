@@ -6,6 +6,7 @@ import com.ai.prompt.PromptBuilder;
 import com.ai.prompt.PromptContext;
 import com.ai.prompt.PromptTemplates;
 import com.dto.profile.ProfileInitRequest;
+import com.entity.MemoryProfileJson;
 import com.entity.UserProfile;
 import com.mapper.UserProfileMapper;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -49,9 +50,9 @@ public class ProfileService {
                 .resumeText(request.getResumeText())
                 .task(PromptTemplates.TASK_PROFILE)
                 .build());
-
-        String profileJson = resumeProfileAgent.parseProfile(agentInput);
-        saveOrUpdateUserProfile(request.getUserId(), profileJson);
+        String normalized = normalizeInitialProfile(agentInput);
+        String profileJson = resumeProfileAgent.parseProfile((String) normalized);
+        saveOrUpdateUserProfile(request.getUserId(), normalized, request.getResumeText());
         memoryService.saveProfileJson(
                 request.getUserId(),
                 profileJson);
@@ -69,7 +70,12 @@ public class ProfileService {
         return profileJson;
     }
 
-    private void saveOrUpdateUserProfile(Long userId, String profileJson) {
+    private String normalizeInitialProfile(
+            String profile) {
+        return new String();
+    }
+
+    private void saveOrUpdateUserProfile(Long userId, String profileJson, String resumeText) {
 
         UserProfile old = userProfileMapper.selectOne(
                 new LambdaQueryWrapper<UserProfile>()
@@ -109,6 +115,7 @@ public class ProfileService {
             profile.setWeaknesses(weaknesses);
             profile.setStrengths(strengths);
             profile.setLearningPreference(learningPreference);
+            profile.setResumeText(resumeText);
 
             if (old == null) {
                 userProfileMapper.insert(profile);

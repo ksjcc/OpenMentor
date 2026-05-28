@@ -2,7 +2,6 @@ package com.service;
 
 import com.common.BizException;
 import com.common.ErrorCode;
-import com.common.GraphRagMode;
 import com.ai.agent.TechInterviewerAgent;
 import com.ai.orchestrator.AgentOrchestrator;
 import com.ai.orchestrator.OrchestratorResult;
@@ -17,7 +16,6 @@ import com.mapper.InterviewMessageMapper;
 import com.mapper.InterviewSessionMapper;
 import com.service.cache.AiRateLimitService;
 import com.service.cache.InterviewMemoryCacheService;
-import com.service.garphrag.GraphRagRetriever;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -57,7 +55,6 @@ public class InterviewService {
         private final InterviewPostProcessProduce interviewPostProcessProduce;
         private final InterviewMemoryCacheService interviewMemoryCacheService;
         private final AiRateLimitService aiRateLimitService;
-        private final GraphRagRetriever graphRagRetriever;
 
         /**
          * 创建一场新的面试，并生成第一道问题
@@ -149,30 +146,25 @@ public class InterviewService {
                 String question = lastAiQuestion.getContent();
 
                 // 4. 保存用户回答到 MySQL，并在事务提交后写入 Redis 短期记忆。
-                InterviewMessage userMessage = saveMessage(
+                saveMessage(
                                 sessionId,
                                 ROLE_USER,
                                 "User",
                                 answer);
 
-                // 5. 当前事务尚未提交，Redis 中还没有本次用户回答。
-                // 因此这里把刚保存的消息合并到内存上下文中，再传给 Agent Prompt。
-                List<InterviewMessage> promptMessages = appendMessageForPrompt(recentMessages, userMessage);
-                // GraphRAG Retrieval
-                List<String> graphRagContext = graphRagRetriever.retrieve(userId, question + "\n" + answer,
-                                GraphRagMode.AUTO);
-
                 // 6. 调用 AgentOrchestrator：
                 // 评分 → 决策 → 生成追问/下一题
                 OrchestratorResult result = agentOrchestrator.handleAnswerWithMultiAgentDecision(userId, sessionId,
                                 topic, question, answer, memoryService.getLatestProfileJson(userId),
-                                memoryService.getLatestSummaryMd(userId, "overall"), graphRagContext);
+                                memoryService.getLatestSummaryMd(userId, "overall"));
                 InterviewReplyDTO reply = new InterviewReplyDTO();
                 reply.setSessionId(sessionId);
                 // 7. 保存 AI 新问题 / 追问
                 reply.setAction(result.getAction());
                 reply.setContent(result.getContent());
                 reply.setScoreJson(result.getScoreJson());
+                reply.setStageLatencyMs(result.getStageLatencyMs());
+                reply.setTotalLatencyMs(result.getTotalLatencyMs());
                 saveMessage(
                                 sessionId,
                                 "ai",
@@ -224,7 +216,8 @@ public class InterviewService {
                 }
 
                 // 3. 调用知识提炼 Agent
-                String extractionJson = agentOrchestrator.extractKnowledge(dialogue.toString());
+                String transcript = dialogue.toString();
+                String extractionJson = agentOrchestrator.extractKnowledge(transcript);
                 if (isBlank(extractionJson)) {
                         throw new BizException(ErrorCode.INTERNAL_ERROR, "AI未生成知识提炼结果");
                 }
@@ -233,6 +226,7 @@ public class InterviewService {
                 session.setId(sessionId);
                 session.setStatus(STATUS_FINISHED);
                 session.setSummary(extractionJson);
+                session.setTranscript(transcript);
                 session.setEndedAt(LocalDateTime.now());
                 interviewSessionMapper.updateById(session);
                 // 4. 发送 MQ 消息，异步处理后续任务
@@ -240,7 +234,7 @@ public class InterviewService {
                 message.setUserId(userId);
                 message.setSessionId(sessionId);
                 message.setExtractionJson(extractionJson);
-                interviewPostProcessProduce.send(message);
+                sendPostProcessAfterCommit(message);
                 return extractionJson;
         }
 
@@ -255,7 +249,7 @@ public class InterviewService {
                 // 旧版直接回答接口同样会调用 AI，因此复用同一个用户级限流规则。
                 aiRateLimitService.checkLimit(userId);
 
-                InterviewReplyDTO reply = agentOrchestrator.HandleAnswer(
+                InterviewReplyDTO reply = agentOrchestrator.handleAnswer(
                                 userId,
                                 topic,
                                 topic,
@@ -389,28 +383,6 @@ public class InterviewService {
         }
 
         /**
-         * 构造传给 Agent Prompt 的最近上下文。
-         *
-         * saveMessage 会在事务提交后才写 Redis，所以当前用户回答需要先放入内存列表，
-         * 这样本轮评分、追问决策和下一题生成都能看到最新回答。
-         */
-        private List<InterviewMessage> appendMessageForPrompt(
-                        List<InterviewMessage> recentMessages,
-                        InterviewMessage message) {
-                List<InterviewMessage> promptMessages = new ArrayList<>();
-                if (recentMessages != null) {
-                        promptMessages.addAll(recentMessages);
-                }
-                promptMessages.add(message);
-
-                if (promptMessages.size() <= 20) {
-                        return promptMessages;
-                }
-
-                return new ArrayList<>(promptMessages.subList(promptMessages.size() - 20, promptMessages.size()));
-        }
-
-        /**
          * 事务提交成功后再写 Redis，保证短期记忆不会领先于 MySQL 持久化状态。
          */
         private void cacheMessageAfterCommit(Long sessionId, InterviewMessage message) {
@@ -423,6 +395,23 @@ public class InterviewService {
                         @Override
                         public void afterCommit() {
                                 interviewMemoryCacheService.cacheMessage(sessionId, message);
+                        }
+                });
+        }
+
+        /**
+         * 等待面试状态和全文提交后再触发异步后处理，确保消费者能读取持久化 transcript。
+         */
+        private void sendPostProcessAfterCommit(InterviewPostProcessMessage message) {
+                if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+                        interviewPostProcessProduce.send(message);
+                        return;
+                }
+
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                                interviewPostProcessProduce.send(message);
                         }
                 });
         }

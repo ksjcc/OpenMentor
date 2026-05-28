@@ -15,6 +15,26 @@ public class InterviewSession {
     private String status;
     private Integer score;
     private String summary;
+    /**
+     * 面试后处理状态：PENDING / PROCESSING / SUCCESS / FAILED。
+     */
+    private String postProcessStatus;
+    /**
+     * 面试后处理已重试次数。
+     */
+    private Integer postProcessRetryCount;
+    /**
+     * 最近一次后处理失败原因。
+     */
+    private String postProcessError;
+    /**
+     * 最近一次后处理完成时间。
+     */
+    private LocalDateTime postProcessFinishedAt;
+    /**
+     * 本场面试完整对话原文，供复盘及后续索引使用。
+     */
+    private String transcript;
     @TableField("created_at")
     private LocalDateTime startTime;
     private LocalDateTime endedAt;
@@ -57,6 +77,46 @@ public class InterviewSession {
 
     public void setSummary(String summary) {
         this.summary = summary;
+    }
+
+    public String getPostProcessStatus() {
+        return postProcessStatus;
+    }
+
+    public void setPostProcessStatus(String postProcessStatus) {
+        this.postProcessStatus = postProcessStatus;
+    }
+
+    public Integer getPostProcessRetryCount() {
+        return postProcessRetryCount;
+    }
+
+    public void setPostProcessRetryCount(Integer postProcessRetryCount) {
+        this.postProcessRetryCount = postProcessRetryCount;
+    }
+
+    public String getPostProcessError() {
+        return postProcessError;
+    }
+
+    public void setPostProcessError(String postProcessError) {
+        this.postProcessError = postProcessError;
+    }
+
+    public LocalDateTime getPostProcessFinishedAt() {
+        return postProcessFinishedAt;
+    }
+
+    public void setPostProcessFinishedAt(LocalDateTime postProcessFinishedAt) {
+        this.postProcessFinishedAt = postProcessFinishedAt;
+    }
+
+    public String getTranscript() {
+        return transcript;
+    }
+
+    public void setTranscript(String transcript) {
+        this.transcript = transcript;
     }
 
     public String getInterviewType() {

@@ -1,6 +1,7 @@
 package com.service;
 
 import com.dto.dashboard.DashboardDTO;
+import com.entity.InterviewSession;
 import com.entity.UserProfile;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mapper.FlashcardMapper;
@@ -45,8 +46,22 @@ class DashboardServiceTest {
         ]
         """);
 
+    InterviewSession session = new InterviewSession();
+    session.setId(10L);
+    session.setStatus("FINISHED");
+    session.setTargetRole("Java后端开发");
+    session.setSummary("""
+        {
+          "summary": "本次面试暴露出 Redis 一致性和 JVM GC 的短板",
+          "weaknesses": [
+            {"name": "JVM GC", "level": 2, "evidence": "对回收过程解释不完整"},
+            {"name": "Redis缓存一致性", "level": 4, "evidence": "缺少延迟双删与旁路缓存比较"}
+          ]
+        }
+        """);
+
     when(userProfileMapper.selectOne(any())).thenReturn(profile);
-    when(interviewSessionMapper.selectList(any())).thenReturn(List.of());
+    when(interviewSessionMapper.selectList(any())).thenReturn(List.of(session));
     when(flashcardMapper.selectCount(any())).thenReturn(0L);
 
     DashboardService service = new DashboardService(
@@ -59,11 +74,20 @@ class DashboardServiceTest {
     DashboardDTO dashboard = service.getDashboard(1L);
 
     assertThat(dashboard.getSkills())
-        .extracting("skill")
-        .containsExactly("Java基础", "Redis缓存一致性");
+        .extracting("skill", "score")
+        .containsExactly(
+            org.assertj.core.groups.Tuple.tuple("Java基础", 70),
+            org.assertj.core.groups.Tuple.tuple("Redis缓存一致性", 0));
     assertThat(dashboard.getWeaknesses())
-        .extracting("name")
-        .containsExactly("Redis缓存一致性", "JVM GC");
+        .extracting("name", "count")
+        .containsExactly(
+            org.assertj.core.groups.Tuple.tuple("Redis缓存一致性", 7),
+            org.assertj.core.groups.Tuple.tuple("JVM GC", 3));
     assertThat(dashboard.getTodayReviewCount()).isZero();
+    assertThat(dashboard.getAiSuggestions())
+        .isNotEmpty()
+        .first()
+        .asString()
+        .contains("Redis缓存一致性");
   }
 }

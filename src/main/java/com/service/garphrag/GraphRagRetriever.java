@@ -18,41 +18,25 @@ public class GraphRagRetriever {
   private final GraphRagDriftSearchService driftSearchService;
   private final GraphRagQueryClassifier queryClassifier;
 
-  public List<String> retrieve(Long userId, String query, GraphRagMode mode) {
+  public List<String> retrieve(Long userId, String query, GraphRagMode mode, boolean realTime) {
+    GraphRagMode finalMode = mode;
     if (mode == GraphRagMode.AUTO) {
-      GraphRagQueryPlan plan = queryClassifier.classify(query, true);
-      mode = plan.getMode();
+      GraphRagQueryPlan plan = queryClassifier.classify(query, realTime);
+      finalMode = plan.getMode();
     }
-    return switch (mode) {
+    return switch (finalMode) {
       case LOCAL -> localSearchService.search(userId, query);
       case GLOBAL -> globalSearchService.search(userId, query);
       case DRIFT -> driftSearchService.search(userId, query);
-      default -> throw new IllegalArgumentException("Unexpected value: " + mode);
+      default -> throw new IllegalArgumentException("Unexpected value: " + finalMode);
     };
   }
 
-  public List<String> retrieve(Long userId, String query) {
-    GraphRagQueryPlan plan = queryClassifier.classify(query, true);
-    return retrieve(userId, query, plan.getMode());
+  public List<String> retrieveForRealtime(Long userId, String query) {
+    return retrieve(userId, query, GraphRagMode.AUTO, true);
   }
 
-  public List<String> autoSearch(Long userId, String query) {
-    if (isGlobalQuestion(query)) {
-      return globalSearchService.search(userId, query);
-    }
-
-    if (query.contains("整体") || query.contains("总结") || query.contains("最近")) {
-      return driftSearchService.search(userId, query);
-    }
-
-    return localSearchService.search(userId, query);
-  }
-
-  private boolean isGlobalQuestion(String query) {
-    return query.contains("总体")
-        || query.contains("整体")
-        || query.contains("总结")
-        || query.contains("主要问题")
-        || query.contains("能力画像");
+  public List<String> retrieveForAnalysis(Long userId, String query) {
+    return retrieve(userId, query, GraphRagMode.AUTO, false);
   }
 }

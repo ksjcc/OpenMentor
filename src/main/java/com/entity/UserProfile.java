@@ -1,4 +1,5 @@
 package com.entity;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 @Data
@@ -15,6 +16,11 @@ public class UserProfile {
     private String strengths;
 
     private String learningPreference;
+    /**
+     * 用户初始化画像时提交的原始简历/项目经历文本。
+     */
+    @TableField("resume_text")
+    private String resumeText;
     public Long getId() {
         return id;
     }
@@ -73,6 +79,12 @@ public class UserProfile {
     }
     public void setLearningPreference(String learningPreference) {
         this.learningPreference = learningPreference;
+    }
+    public String getResumeText() {
+        return resumeText;
+    }
+    public void setResumeText(String resumeText) {
+        this.resumeText = resumeText;
     }
 
 }
