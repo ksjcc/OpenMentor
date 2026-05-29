@@ -26,7 +26,17 @@ public class GraphRagDriftSearchService {
    * 3. 对细化查询执行 Local Search
    */
   public List<String> search(Long userId, String query) {
-    List<String> globalContext = globalSearchService.search(userId, query);
+    return search(userId, query, null);
+  }
+
+  public List<String> search(Long userId, String query, RetrievalBudget budget) {
+    List<String> globalContext = globalSearchService.search(userId, query, budget);
+    if (globalContext.isEmpty()) {
+      return globalContext;
+    }
+    if (budget != null && !budget.consumeLlmCall()) {
+      return globalContext;
+    }
     String prompt = """
          用户问题：
         %s
@@ -45,7 +55,7 @@ public class GraphRagDriftSearchService {
     List<String> result = new ArrayList<>();
     result.addAll(globalContext);
     for (String q : expandedQueries) {
-      result.addAll(localSearchService.search(userId, q));
+      result.addAll(localSearchService.search(userId, q, budget));
     }
     return result.stream()
         .distinct()

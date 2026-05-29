@@ -20,6 +20,14 @@ public class GraphRagGlobalSearchService {
    * 使用社区报告作为全局上下文。
    */
   public List<String> search(Long userId, String query) {
+    return search(userId, query, null);
+  }
+
+  public List<String> search(Long userId, String query, RetrievalBudget budget) {
+    if (budget != null && !budget.consumeGraphHop()) {
+      return List.of();
+    }
+
     List<GraphCommunityReport> reports = reportMapper.selectTopReports(userId, 5);
     return reports.stream()
         .map(r -> """
@@ -31,6 +39,7 @@ public class GraphRagGlobalSearchService {
             r.getTitle(),
             r.getSummary(),
             r.getFindingsJson()))
+        .filter(report -> budget == null || budget.consumeChunk(1))
         .toList();
   }
 

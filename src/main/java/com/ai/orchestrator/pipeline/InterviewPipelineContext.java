@@ -2,8 +2,11 @@ package com.ai.orchestrator.pipeline;
 
 import java.util.List;
 
+import com.common.GraphRagMode;
 import com.ai.prompt.PromptContext;
+import com.dto.graphrag.RetrievalPlanDTO;
 import com.dto.score.ScoreResultDTO;
+import com.service.garphrag.RetrievalBudget;
 
 import lombok.Builder;
 import lombok.Data;
@@ -22,5 +25,9 @@ public class InterviewPipelineContext {
   private ScoreResultDTO scoreResult;
   private String weakTopic;
   private List<String> graphRagContext;
+  private GraphRagMode usedGraphMode;
+  private boolean graphFallbackTriggered;
   private PromptContext promptContext;
+  private RetrievalPlanDTO retrievalPlan;
+  private RetrievalBudget retrievalBudget;
 }

@@ -1,13 +1,18 @@
 package com.ai.rag;
 
-import org.springframework.cache.annotation.Cacheable;
+import org.springframework.stereotype.Service;
+
 import com.ai.client.LlmClient;
 import com.service.cache.AiQueryCacheService;
 
-public class HydeQueryExpansionService {
-  private LlmClient llmClient;
+import lombok.RequiredArgsConstructor;
 
-  private AiQueryCacheService cacheService;
+@Service
+@RequiredArgsConstructor
+public class HydeQueryExpansionService {
+  private final LlmClient llmClient;
+
+  private final AiQueryCacheService cacheService;
 
   public String expand(String query) {
     if (query == null || query.isBlank()) {

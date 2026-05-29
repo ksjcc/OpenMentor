@@ -19,6 +19,7 @@ import com.ai.decision.MemoryDecisionService;
 import com.ai.orchestrator.pipeline.GraphRagEnrichmentStage;
 import com.ai.orchestrator.pipeline.InterviewPipelineContext;
 import com.ai.orchestrator.pipeline.PromptAssemblyStage;
+import com.ai.orchestrator.pipeline.RetrievalPlanningStage;
 import com.ai.orchestrator.pipeline.ScoringStage;
 import com.ai.prompt.PromptBuilder;
 import com.ai.prompt.PromptContext;
@@ -29,6 +30,7 @@ import com.dto.decision.AgentDecisionDTO;
 import com.dto.decision.FinalDecisionDTO;
 import com.dto.score.ScoreResultDTO;
 import com.service.MemoryService;
+import com.service.garphrag.RetrievalBudgetService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -54,6 +56,8 @@ public class AgentOrchestrator {
     private final GraphRagEnrichmentStage graphRagEnrichmentStage;
     private final PromptAssemblyStage promptAssemblyStage;
     private final Executor llmTaskExecutor;
+    private final RetrievalPlanningStage retrievalPlanningStage;
+    private final RetrievalBudgetService retrievalBudgetService;
 
     /**
      * 生成面试第一题。
@@ -127,6 +131,7 @@ public class AgentOrchestrator {
                 .question(question)
                 .answer(answer)
                 .realTime(true)
+                .retrievalBudget(retrievalBudgetService.createBudget())
                 .build();
 
         long stageStart = System.nanoTime();
@@ -134,6 +139,10 @@ public class AgentOrchestrator {
         metrics.recordStage("scoring", stageStart);
 
         context.setWeakTopic(resolveWeakTopic(context.getScoreResult(), topic));
+
+        stageStart = System.nanoTime();
+        retrievalPlanningStage.execute(context);
+        metrics.recordStage("retrievalPlanning", stageStart);
 
         stageStart = System.nanoTime();
         graphRagEnrichmentStage.execute(context);

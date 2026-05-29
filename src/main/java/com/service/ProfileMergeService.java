@@ -129,8 +129,6 @@ public class ProfileMergeService {
     }
   }
 
-  }
-
   private void mergeStrengths(ObjectNode profile, KnowledgeExtractionResult extraction) {
     if (extraction.getStrengths() == null) {
       return;
@@ -443,6 +441,109 @@ public class ProfileMergeService {
                 + delta));
   }
 
+  private void applyOverride(
+      MemoryProfileJson profile,
+      String field,
+      Object newValue) {
+    if (profile == null || isBlank(field) || newValue == null) {
+      return;
+    }
+
+    ObjectNode root = parseProfile(profile.getProfileData());
+    JsonNode valueNode = objectMapper.valueToTree(newValue);
+    root.set(field, valueNode);
+    profile.setProfileData(toJson(root));
+  }
+
+  private void mergeCollectionField(
+      MemoryProfileJson profile,
+      String field,
+      Object oldValue,
+      Object newValue) {
+    if (profile == null || isBlank(field) || newValue == null) {
+      return;
+    }
+
+    ObjectNode root = parseProfile(profile.getProfileData());
+    ArrayNode target = ensureArray(root, field);
+    JsonNode newNode = objectMapper.valueToTree(newValue);
+    if (!newNode.isArray()) {
+      profile.setProfileData(toJson(root));
+      return;
+    }
+
+    for (JsonNode item : newNode) {
+      String name = getName(item);
+      if (isBlank(name)) {
+        if (!containsSameScalar(target, item)) {
+          target.add(item);
+        }
+        continue;
+      }
+
+      ObjectNode merged = findOrCreateByName(target, name);
+      if (item.isObject()) {
+        item.fields().forEachRemaining(entry -> merged.set(entry.getKey(), entry.getValue()));
+      } else if (!merged.has("name")) {
+        merged.put("name", name);
+      }
+      increaseOccurrence(merged);
+    }
+
+    profile.setProfileData(toJson(root));
+  }
+
+  private void mergeAbilityField(
+      MemoryProfileJson profile,
+      Object oldValue,
+      Object newValue) {
+    if (profile == null || newValue == null) {
+      return;
+    }
+
+    ObjectNode root = parseProfile(profile.getProfileData());
+    ObjectNode abilityMap = ensureObject(root, "abilityMap");
+    JsonNode newNode = objectMapper.valueToTree(newValue);
+    if (!newNode.isObject()) {
+      profile.setProfileData(toJson(root));
+      return;
+    }
+
+    Iterator<Map.Entry<String, JsonNode>> fields = newNode.fields();
+    while (fields.hasNext()) {
+      Map.Entry<String, JsonNode> entry = fields.next();
+      if (isBlank(entry.getKey()) || !entry.getValue().isNumber()) {
+        continue;
+      }
+      int oldScore = abilityMap.path(entry.getKey()).asInt(DEFAULT_ABILITY_SCORE);
+      int mergedScore = smoothScore(oldScore, entry.getValue().asInt());
+      abilityMap.put(entry.getKey(), mergedScore);
+    }
+
+    profile.setProfileData(toJson(root));
+  }
+
+  private void appendEvidence(
+      MemoryProfileJson profile,
+      String field,
+      Object newValue) {
+    if (profile == null || isBlank(field) || newValue == null) {
+      return;
+    }
+
+    ObjectNode root = parseProfile(profile.getProfileData());
+    ArrayNode evidences = ensureArray(root, field + "Evidence");
+    JsonNode valueNode = objectMapper.valueToTree(newValue);
+    if (valueNode.isArray()) {
+      for (JsonNode item : valueNode) {
+        evidences.add(item);
+      }
+    } else {
+      evidences.add(valueNode);
+    }
+    profile.setProfileData(toJson(root));
+  }
+
   private void mergeScalarField(
       ObjectNode profile,
       String field,
@@ -585,6 +686,18 @@ public class ProfileMergeService {
       return node.asText();
     }
     return node.path("name").asText("");
+  }
+
+  private boolean containsSameScalar(ArrayNode array, JsonNode candidate) {
+    if (candidate == null || candidate.isContainerNode()) {
+      return false;
+    }
+    for (JsonNode item : array) {
+      if (!item.isContainerNode() && item.equals(candidate)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private void increaseOccurrence(ObjectNode node) {

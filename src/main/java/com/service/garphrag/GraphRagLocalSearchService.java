@@ -5,7 +5,6 @@ import java.util.List;
 
 import org.springframework.stereotype.Service;
 
-import com.ai.rag.HydeQueryExpansionService;
 import com.ai.rag.VectorStoreService;
 import com.entity.graphrag.GraphRagEntity;
 import com.entity.graphrag.GraphRagRelationship;
@@ -23,22 +22,29 @@ public class GraphRagLocalSearchService {
   private final GraphRelationshipMapper relationshipMapper;
   private final GraphTextUnitMapper textUnitMapper;
   private final VectorStoreService vectorStoreService;
-  private final HydeQueryExpansionService hydeQueryExpansionService;
 
   public List<String> search(Long userId, String query) {
+    return search(userId, query, null);
+  }
+
+  public List<String> search(Long userId, String query, RetrievalBudget budget) {
+    if (budget != null && !budget.consumeGraphHop()) {
+      return List.of();
+    }
+
     List<String> context = new ArrayList<>();
-    String hydeQuery = hydeQueryExpansionService.expand(query);
-    List<GraphRagEntity> entities = entityMapper.searchByName(userId, hydeQuery);
+    List<GraphRagEntity> entities = entityMapper.searchByName(userId, query);
     for (GraphRagEntity entity : entities) {
-      context.add("实体：" + entity.getName()
-          + "，说明：" + entity.getDescription());
+      if (!appendWithinBudget(context, "实体：" + entity.getName()
+          + "，说明：" + entity.getDescription(), budget)) {
+        return context.stream().distinct().toList();
+      }
       List<GraphRagRelationship> rels = relationshipMapper.selectBySourceEntityId(entity.getId());
       for (GraphRagRelationship rel : rels) {
         GraphRagEntity target = entityMapper.selectById(
             rel.getTargetEntityId());
         if (target != null) {
-
-          context.add(
+          if (!appendWithinBudget(context,
               "关系："
                   + entity.getName()
                   + " -"
@@ -46,27 +52,44 @@ public class GraphRagLocalSearchService {
                   + "-> "
                   + target.getName()
                   + "，说明："
-                  + rel.getDescription());
+                  + rel.getDescription(),
+              budget)) {
+            return context.stream().distinct().toList();
+          }
         }
         GraphTextUnit unit = textUnitMapper.selectById(
             rel.getTextUnitId());
         if (unit != null) {
-          context.add(
+          if (!appendWithinBudget(context,
               "来源片段："
-                  + unit.getContent());
+                  + unit.getContent(),
+              budget)) {
+            return context.stream().distinct().toList();
+          }
         }
       }
     }
     List<String> vectorChunks = vectorStoreService.search(
         userId,
-        hydeQuery,
+        query,
         5);
-
-    context.addAll(vectorChunks);
+    for (String vectorChunk : vectorChunks) {
+      if (!appendWithinBudget(context, vectorChunk, budget)) {
+        break;
+      }
+    }
 
     return context.stream()
         .distinct()
         .limit(12)
         .toList();
+  }
+
+  private boolean appendWithinBudget(List<String> context, String content, RetrievalBudget budget) {
+    if (budget != null && !budget.consumeChunk(1)) {
+      return false;
+    }
+    context.add(content);
+    return true;
   }
 }

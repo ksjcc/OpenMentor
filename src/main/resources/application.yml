@@ -77,3 +77,10 @@ vector-store:
     dimension: ${AI_EMBEDDING_DIMENSIONS:1024}
     min-score: ${PGVECTOR_MIN_SCORE:0.6}
     initialize-schema: ${PGVECTOR_INITIALIZE_SCHEMA:true}
+
+graphrag:
+  budget:
+    retriever-calls: 3
+    graph-hop: 2
+    chunk-limit: 12
+    llm-calls: 2

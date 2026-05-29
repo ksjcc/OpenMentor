@@ -8,49 +8,75 @@ import com.dto.graphrag.GraphRagQueryPlan;
 
 @Component
 public class GraphRagQueryClassifier {
+  public GraphRagQueryPlan classify(Long userId, String query, boolean realTime) {
+    return classify(query, realTime);
+  }
+
   public GraphRagQueryPlan classify(String query, boolean realTime) {
-    GraphRagQueryPlan plan = new GraphRagQueryPlan();
     if (query == null || query.isBlank()) {
-      plan.setQueryType(GraphRagQueryType.SIMPLE_FACT);
-      plan.setMode(GraphRagMode.LOCAL);
-      plan.setReason("空问题，默认使用低成本 LOCAL 检索。");
-      return plan;
+      return GraphRagQueryPlan.builder()
+          .queryType(GraphRagQueryType.SIMPLE_FACT)
+          .mode(GraphRagMode.LOCAL)
+          .needHyde(false)
+          .allowFallback(false)
+          .maxResults(6)
+          .reason("空问题，默认使用低成本 LOCAL 检索。")
+          .build();
     }
 
     String q = query.trim();
     if (isGlobalQuestion(q)) {
-      plan.setQueryType(GraphRagQueryType.GLOBAL_SUMMARY);
-      plan.setMode(GraphRagMode.GLOBAL);
-      plan.setReason("问题关注整体能力、总结或全局薄弱点，使用 GLOBAL。");
-      return plan;
+      return GraphRagQueryPlan.builder()
+          .queryType(GraphRagQueryType.GLOBAL_SUMMARY)
+          .mode(GraphRagMode.GLOBAL)
+          .needHyde(false)
+          .allowFallback(true)
+          .maxResults(8)
+          .reason("问题关注整体能力、总结或全局薄弱点，使用 GLOBAL。")
+          .build();
     }
 
     if (isDeepReasoningQuestion(q)) {
-      plan.setQueryType(GraphRagQueryType.DEEP_REASONING);
-
       if (realTime) {
-        plan.setMode(GraphRagMode.LOCAL);
-        plan.setReason("问题需要深度推理，但当前是实时面试场景，降级为 LOCAL。");
-      } else {
-        plan.setMode(GraphRagMode.DRIFT);
-        plan.setReason("问题涉及原因链或多跳推理，使用 DRIFT。");
+        return GraphRagQueryPlan.builder()
+            .queryType(GraphRagQueryType.DEEP_REASONING)
+            .mode(GraphRagMode.LOCAL)
+            .needHyde(true)
+            .allowFallback(true)
+            .maxResults(8)
+            .reason("问题需要深度推理，但当前是实时面试场景，先执行 LOCAL，并允许 fallback。")
+            .build();
       }
 
-      return plan;
+      return GraphRagQueryPlan.builder()
+          .queryType(GraphRagQueryType.DEEP_REASONING)
+          .mode(GraphRagMode.DRIFT)
+          .needHyde(true)
+          .allowFallback(true)
+          .maxResults(10)
+          .reason("问题涉及原因链或多跳推理，使用 DRIFT，并允许 fallback。")
+          .build();
     }
 
     if (isLocalEntityQuestion(q)) {
-      plan.setQueryType(GraphRagQueryType.ENTITY_LOCAL);
-      plan.setMode(GraphRagMode.LOCAL);
-      plan.setReason("问题围绕明确知识点或当前追问主题，使用 LOCAL。");
-      return plan;
+      return GraphRagQueryPlan.builder()
+          .queryType(GraphRagQueryType.ENTITY_LOCAL)
+          .mode(GraphRagMode.LOCAL)
+          .needHyde(true)
+          .allowFallback(true)
+          .maxResults(8)
+          .reason("问题围绕明确知识点或当前追问主题，使用 LOCAL。")
+          .build();
     }
 
-    plan.setQueryType(GraphRagQueryType.SIMPLE_FACT);
-    plan.setMode(GraphRagMode.LOCAL);
-    plan.setReason("未命中特殊规则，使用轻量检索。");
-
-    return plan;
+    return GraphRagQueryPlan.builder()
+        .queryType(GraphRagQueryType.SIMPLE_FACT)
+        .mode(GraphRagMode.LOCAL)
+        .needHyde(false)
+        .allowFallback(true)
+        .maxResults(6)
+        .reason("未命中特殊规则，使用轻量检索。")
+        .build();
   }
 
   private boolean isGlobalQuestion(String q) {
