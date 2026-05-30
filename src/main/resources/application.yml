@@ -65,7 +65,7 @@ langchain4j:
     embedding-model:
       api-key: ${DASHSCOPE_API_KEY:}
       base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
-      model-name: ${AI_EMBEDDING_MODEL:text-embedding-v3}
+      model-name: ${AI_EMBEDDING_MODEL:bge-m3}
       dimensions: ${AI_EMBEDDING_DIMENSIONS:1024}
 
 vector-store:

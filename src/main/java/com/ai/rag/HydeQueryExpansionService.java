@@ -5,6 +5,8 @@ import org.springframework.stereotype.Service;
 import com.ai.client.LlmClient;
 import com.service.cache.AiQueryCacheService;
 
+import java.time.Duration;
+
 import lombok.RequiredArgsConstructor;
 
 @Service
@@ -40,7 +42,7 @@ public class HydeQueryExpansionService {
       if (hyde == null || hyde.isBlank()) {
         return query;
       }
-      cacheService.putHyde(query, hyde);
+      cacheService.putHyde(query, hyde, Duration.ofHours(6));
       return hyde.trim();
     } catch (Exception e) {
     }

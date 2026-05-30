@@ -30,8 +30,9 @@ public class AiConfig {
      * Embedding 模型：用于把 MemoryChunk 转成向量
      *
      * 注意：
-     * text-embedding-v3 是通义常用 embedding 模型之一。
-     * 如果你的账号模型名不同，需要在阿里云 DashScope 控制台确认。
+     * 默认改为 BGE/GTE 系列兼容的模型名，当前默认值为 bge-m3。
+     * 如果你在 DashScope 或其他 OpenAI-compatible 服务里使用的是 gte-*，
+     * 直接通过 AI_EMBEDDING_MODEL 和 AI_EMBEDDING_DIMENSIONS 覆盖即可。
      */
     @Bean
     public EmbeddingModel embeddingModel(

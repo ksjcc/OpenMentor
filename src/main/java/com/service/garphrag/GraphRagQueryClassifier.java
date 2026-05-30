@@ -1,82 +1,113 @@
 package com.service.garphrag;
 
+import java.util.List;
+
 import org.springframework.stereotype.Component;
 
 import com.common.GraphRagMode;
-import com.common.GraphRagQueryType;
-import com.dto.graphrag.GraphRagQueryPlan;
+import com.common.GraphRagRetrieverType;
+import com.dto.graphrag.GraphRagRetrievalPlan;
 
 @Component
 public class GraphRagQueryClassifier {
-  public GraphRagQueryPlan classify(Long userId, String query, boolean realTime) {
+  public GraphRagRetrievalPlan classify(Long userId, String query, boolean realTime) {
     return classify(query, realTime);
   }
 
-  public GraphRagQueryPlan classify(String query, boolean realTime) {
+  public GraphRagRetrievalPlan classify(String query, boolean realTime) {
     if (query == null || query.isBlank()) {
-      return GraphRagQueryPlan.builder()
-          .queryType(GraphRagQueryType.SIMPLE_FACT)
+      return GraphRagRetrievalPlan.builder()
           .mode(GraphRagMode.LOCAL)
-          .needHyde(false)
-          .allowFallback(false)
-          .maxResults(6)
+          .retrievers(List.of(GraphRagRetrieverType.LOCAL))
+          .needRerank(false)
+          .budget(2)
           .reason("空问题，默认使用低成本 LOCAL 检索。")
           .build();
     }
 
     String q = query.trim();
-    if (isGlobalQuestion(q)) {
-      return GraphRagQueryPlan.builder()
-          .queryType(GraphRagQueryType.GLOBAL_SUMMARY)
+    int tokenLikeLength = normalizedLength(q);
+    boolean global = isGlobalQuestion(q);
+    boolean deepReasoning = isDeepReasoningQuestion(q);
+    boolean localEntity = isLocalEntityQuestion(q);
+    boolean crossTopic = isCrossTopicQuestion(q) || tokenLikeLength >= 36;
+    boolean liveSignal = realTime || isRealtimeQuestion(q);
+
+    if (global) {
+      return GraphRagRetrievalPlan.builder()
           .mode(GraphRagMode.GLOBAL)
-          .needHyde(false)
-          .allowFallback(true)
-          .maxResults(8)
-          .reason("问题关注整体能力、总结或全局薄弱点，使用 GLOBAL。")
+          .retrievers(List.of(
+              GraphRagRetrieverType.GLOBAL,
+              GraphRagRetrieverType.VECTOR,
+              GraphRagRetrieverType.MEMORY))
+          .needRerank(true)
+          .budget(liveSignal ? 3 : 4)
+          .reason("问题偏全局总结，优先社区报告，并补充向量与记忆信息。")
           .build();
     }
 
-    if (isDeepReasoningQuestion(q)) {
-      if (realTime) {
-        return GraphRagQueryPlan.builder()
-            .queryType(GraphRagQueryType.DEEP_REASONING)
-            .mode(GraphRagMode.LOCAL)
-            .needHyde(true)
-            .allowFallback(true)
-            .maxResults(8)
-            .reason("问题需要深度推理，但当前是实时面试场景，先执行 LOCAL，并允许 fallback。")
-            .build();
-      }
-
-      return GraphRagQueryPlan.builder()
-          .queryType(GraphRagQueryType.DEEP_REASONING)
-          .mode(GraphRagMode.DRIFT)
-          .needHyde(true)
-          .allowFallback(true)
-          .maxResults(10)
-          .reason("问题涉及原因链或多跳推理，使用 DRIFT，并允许 fallback。")
-          .build();
-    }
-
-    if (isLocalEntityQuestion(q)) {
-      return GraphRagQueryPlan.builder()
-          .queryType(GraphRagQueryType.ENTITY_LOCAL)
+    if (deepReasoning && liveSignal) {
+      return GraphRagRetrievalPlan.builder()
           .mode(GraphRagMode.LOCAL)
-          .needHyde(true)
-          .allowFallback(true)
-          .maxResults(8)
-          .reason("问题围绕明确知识点或当前追问主题，使用 LOCAL。")
+          .retrievers(List.of(
+              GraphRagRetrieverType.LOCAL,
+              GraphRagRetrieverType.VECTOR,
+              GraphRagRetrieverType.MEMORY))
+          .needRerank(true)
+          .budget(3)
+          .reason("问题需要推理，但当前是实时场景，先走低延迟的 LOCAL/VECTOR/MEMORY 组合。")
           .build();
     }
 
-    return GraphRagQueryPlan.builder()
-        .queryType(GraphRagQueryType.SIMPLE_FACT)
+    if (deepReasoning || crossTopic) {
+      return GraphRagRetrievalPlan.builder()
+          .mode(GraphRagMode.DRIFT)
+          .retrievers(List.of(
+              GraphRagRetrieverType.DRIFT,
+              GraphRagRetrieverType.GLOBAL,
+              GraphRagRetrieverType.LOCAL,
+              GraphRagRetrieverType.VECTOR))
+          .needRerank(true)
+          .budget(crossTopic ? 5 : 4)
+          .reason("问题涉及跨主题或多跳推理，使用 DRIFT 作为主检索并做多源聚合。")
+          .build();
+    }
+
+    if (localEntity) {
+      return GraphRagRetrievalPlan.builder()
+          .mode(GraphRagMode.LOCAL)
+          .retrievers(List.of(
+              GraphRagRetrieverType.LOCAL,
+              GraphRagRetrieverType.VECTOR))
+          .needRerank(tokenLikeLength >= 18)
+          .budget(3)
+          .reason("问题围绕明确知识点，使用 LOCAL 主检索，并用 VECTOR 补召回。")
+          .build();
+    }
+
+    return GraphRagRetrievalPlan.builder()
         .mode(GraphRagMode.LOCAL)
-        .needHyde(false)
-        .allowFallback(true)
-        .maxResults(6)
-        .reason("未命中特殊规则，使用轻量检索。")
+        .retrievers(List.of(
+            GraphRagRetrieverType.LOCAL,
+            GraphRagRetrieverType.MEMORY))
+        .needRerank(tokenLikeLength >= 20)
+        .budget(3)
+        .reason("未命中特殊规则，使用轻量 LOCAL + MEMORY 检索。")
         .build();
+  }
+
+  private int normalizedLength(String q) {
+    return q.replaceAll("\\s+", "").length();
+  }
+
+  private boolean isRealtimeQuestion(String q) {
+    return containsAny(q, "刚才", "上一题", "当前", "现在", "立刻", "马上", "这轮");
+  }
+
+  private boolean isCrossTopicQuestion(String q) {
+    return containsAny(q,
+        "结合", "对比", "区别", "权衡", "取舍", "链路", "体系",
+        "从", "到", "同时", "分别", "多个", "跨");
   }
 
   private boolean isGlobalQuestion(String q) {

@@ -11,6 +11,7 @@ import java.util.function.Supplier;
 
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class LlmClient {
 
     private final ChatLanguageModel chatModel;

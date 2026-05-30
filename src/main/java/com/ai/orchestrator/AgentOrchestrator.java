@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
@@ -21,6 +22,7 @@ import com.ai.orchestrator.pipeline.InterviewPipelineContext;
 import com.ai.orchestrator.pipeline.PromptAssemblyStage;
 import com.ai.orchestrator.pipeline.RetrievalPlanningStage;
 import com.ai.orchestrator.pipeline.ScoringStage;
+import com.ai.orchestrator.pipeline.TraceContext;
 import com.ai.prompt.PromptBuilder;
 import com.ai.prompt.PromptContext;
 import com.ai.prompt.PromptTemplates;
@@ -29,6 +31,7 @@ import com.dto.InterviewReplyDTO;
 import com.dto.decision.AgentDecisionDTO;
 import com.dto.decision.FinalDecisionDTO;
 import com.dto.score.ScoreResultDTO;
+import com.entity.Trace.TraceEvent;
 import com.service.MemoryService;
 import com.service.garphrag.RetrievalBudgetService;
 
@@ -123,6 +126,8 @@ public class AgentOrchestrator {
             String answer,
             String profileJson,
             String summaryMd) {
+        TraceContext trace = new TraceContext();
+        trace.setTraceId(UUID.randomUUID().toString());
         OrchestratorMetrics metrics = new OrchestratorMetrics();
         InterviewPipelineContext context = InterviewPipelineContext.builder()
                 .userId(userId)
@@ -132,6 +137,7 @@ public class AgentOrchestrator {
                 .answer(answer)
                 .realTime(true)
                 .retrievalBudget(retrievalBudgetService.createBudget())
+                .traceContext(trace)
                 .build();
 
         long stageStart = System.nanoTime();
@@ -161,7 +167,7 @@ public class AgentOrchestrator {
         metrics.recordStage("promptAssembly", stageStart);
 
         stageStart = System.nanoTime();
-        String nextContent = generateNextContent(context.getPromptContext(), finalDecision);
+        String nextContent = generateNextContent(context, finalDecision);
         metrics.recordStage("generation", stageStart);
 
         OrchestratorResult result = new OrchestratorResult();
@@ -238,13 +244,60 @@ public class AgentOrchestrator {
         return fallbackTopic;
     }
 
-    private String generateNextContent(PromptContext promptContext, FinalDecisionDTO finalDecision) {
-        return switch (finalDecision.getAction()) {
-            case FOLLOW_UP -> followUpAgent.askFollowUp(promptBuilder.buildFollowUpPrompt(promptContext));
-            case HARDER -> techInterviewerAgent.askQuestion(promptBuilder.buildHarderQuestionPrompt(promptContext));
-            case NEXT -> techInterviewerAgent.askQuestion(promptBuilder.buildQuestionPrompt(promptContext));
-            case FINISH -> "本轮面试已完成，接下来将为你生成面试报告和复习建议。";
-        };
+    private String generateNextContent(InterviewPipelineContext context, FinalDecisionDTO finalDecision) {
+        long start = System.currentTimeMillis();
+        PromptContext promptContext = context.getPromptContext();
+        String stageInput;
+        String agentName;
+        String output;
+
+        switch (finalDecision.getAction()) {
+            case FOLLOW_UP -> {
+                stageInput = promptBuilder.buildFollowUpPrompt(promptContext);
+                agentName = "followUpAgent";
+                output = followUpAgent.askFollowUp(stageInput);
+            }
+            case HARDER -> {
+                stageInput = promptBuilder.buildHarderQuestionPrompt(promptContext);
+                agentName = "techInterviewerAgent";
+                output = techInterviewerAgent.askQuestion(stageInput);
+            }
+            case NEXT -> {
+                stageInput = promptBuilder.buildQuestionPrompt(promptContext);
+                agentName = "techInterviewerAgent";
+                output = techInterviewerAgent.askQuestion(stageInput);
+            }
+            case FINISH -> {
+                stageInput = finalDecision.getReason() == null ? "" : finalDecision.getReason();
+                agentName = "system";
+                output = "本轮面试已完成，接下来将为你生成面试报告和复习建议。";
+            }
+            default -> throw new IllegalStateException("Unexpected value: " + finalDecision.getAction());
+        }
+
+        if (context.getTraceContext() != null) {
+            long end = System.currentTimeMillis();
+            TraceEvent event = TraceEvent.builder()
+                    .stage("generation")
+                    .startTime(start)
+                    .endTime(end)
+                    .latencyMs(end - start)
+                    .input(stageInput)
+                    .output(output)
+                    .metadata(Map.of(
+                            "action", finalDecision.getAction().name(),
+                            "agent", agentName,
+                            "topic", promptContext == null || promptContext.getTopic() == null ? "" : promptContext.getTopic(),
+                            "graphMode", context.getUsedGraphMode() == null ? "" : context.getUsedGraphMode().name(),
+                            "fallbackTriggered", context.isGraphFallbackTriggered(),
+                            "promptLength", stageInput == null ? 0 : stageInput.length(),
+                            "outputLength", output == null ? 0 : output.length(),
+                            "decisionReason", finalDecision.getReason() == null ? "" : finalDecision.getReason()))
+                    .build();
+            context.getTraceContext().addEvent(event);
+        }
+
+        return output;
     }
 
     private boolean isBlank(String value) {

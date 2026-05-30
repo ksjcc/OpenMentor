@@ -30,4 +30,5 @@ public class InterviewPipelineContext {
   private PromptContext promptContext;
   private RetrievalPlanDTO retrievalPlan;
   private RetrievalBudget retrievalBudget;
+  private TraceContext traceContext;
 }

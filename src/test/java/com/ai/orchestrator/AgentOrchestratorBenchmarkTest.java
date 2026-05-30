@@ -28,12 +28,14 @@ import com.ai.decision.GraphDecisionService;
 import com.ai.decision.MemoryDecisionService;
 import com.ai.orchestrator.pipeline.GraphRagEnrichmentStage;
 import com.ai.orchestrator.pipeline.PromptAssemblyStage;
+import com.ai.orchestrator.pipeline.RetrievalPlanningStage;
 import com.ai.orchestrator.pipeline.ScoringStage;
 import com.ai.prompt.PromptBuilder;
 import com.dto.decision.AgentDecisionDTO;
 import com.dto.score.ScoreResultDTO;
 import com.ai.rag.HybridRetriever;
 import com.service.MemoryService;
+import com.service.garphrag.RetrievalBudgetService;
 
 @ExtendWith(MockitoExtension.class)
 class AgentOrchestratorBenchmarkTest {
@@ -75,6 +77,12 @@ class AgentOrchestratorBenchmarkTest {
 
     @Mock
     private PromptAssemblyStage promptAssemblyStage;
+
+    @Mock
+    private RetrievalPlanningStage retrievalPlanningStage;
+
+    @Mock
+    private RetrievalBudgetService retrievalBudgetService;
 
     private final DecisionAggregator decisionAggregator = new DecisionAggregator();
 
@@ -118,7 +126,9 @@ class AgentOrchestratorBenchmarkTest {
                 scoringStage,
                 graphRagEnrichmentStage,
                 promptAssemblyStage,
-                TEST_EXECUTOR);
+                TEST_EXECUTOR,
+                retrievalPlanningStage,
+                retrievalBudgetService);
 
         ScoreResultDTO scoreResult = new ScoreResultDTO();
         scoreResult.setScore(58);
@@ -190,7 +200,9 @@ class AgentOrchestratorBenchmarkTest {
                 scoringStage,
                 graphRagEnrichmentStage,
                 promptAssemblyStage,
-                TEST_EXECUTOR);
+                TEST_EXECUTOR,
+                retrievalPlanningStage,
+                retrievalBudgetService);
 
         OrchestratorResult result = orchestrator.handleAnswerWithMultiAgentDecision(
                 1L,

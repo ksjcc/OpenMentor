@@ -5,15 +5,12 @@ import com.dto.InterviewReplyDTO;
 import com.service.InterviewService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/interview")
@@ -27,6 +24,7 @@ public class InterviewController {
         }
 
         @PostMapping("/start")
+        @Operation(summary = "启动模拟面试")
         public Result<InterviewReplyDTO> startInterview(
                         @RequestParam Long userId,
                         @RequestParam String interviewType,
@@ -49,6 +47,7 @@ public class InterviewController {
          * Body: 用户回答内容
          */
         @PostMapping("/{sessionId}/answer")
+        @Operation(summary = "提交用户回答")
         public Result<InterviewReplyDTO> answerQuestion(
                         @PathVariable Long sessionId,
                         @RequestParam Long userId,
@@ -69,6 +68,7 @@ public class InterviewController {
          * POST /api/interview/{sessionId}/finish?userId=1
          */
         @PostMapping("/{sessionId}/finish")
+        @Operation(summary = "结束模拟面试")
         public Result<String> finishInterview(
                         @PathVariable Long sessionId,
                         @RequestParam Long userId) {

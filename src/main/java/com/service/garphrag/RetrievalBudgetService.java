@@ -17,6 +17,12 @@ public class RetrievalBudgetService {
   @Value("${graphrag.budget.llm-calls:2}")
   private int maxLlmCalls;
 
+  @Value("${graphrag.budget.search-steps:6}")
+  private int maxSearchSteps;
+
+  @Value("${graphrag.budget.timeout-ms:2500}")
+  private long timeoutMs;
+
   public RetrievalBudget createBudget() {
 
     RetrievalBudget budget = new RetrievalBudget();
@@ -32,6 +38,14 @@ public class RetrievalBudgetService {
 
     budget.setRemainingLlmCalls(
         maxLlmCalls);
+
+    budget.setRemainingSearchSteps(
+        maxSearchSteps);
+
+    budget.setTimeoutMs(
+        timeoutMs);
+
+    budget.start();
 
     return budget;
   }

@@ -10,6 +10,7 @@ import com.entity.MemoryChunk;
 import com.service.DashboardService;
 import com.service.FlashcardService;
 import com.service.InterviewService;
+import com.service.KnowledgeQaService;
 import com.service.KnowledgeGraphService;
 import com.service.MemoryService;
 import com.service.ReviewService;
@@ -23,8 +24,10 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.List;
 
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.http.MediaType.TEXT_PLAIN;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -53,10 +56,14 @@ class ApiSmokeTest {
   @Mock
   private MemoryService memoryService;
 
+  @Mock
+  private KnowledgeQaService knowledgeQaService;
+
   @BeforeEach
   void setUp() {
     mockMvc = MockMvcBuilders.standaloneSetup(
         new InterviewController(interviewService),
+        new KnowledgeController(knowledgeQaService),
         new ReviewController(reviewService, flashcardService),
         new DashboardController(dashboardService),
         new KnowledgeGraphController(knowledgeGraphService),
@@ -185,6 +192,20 @@ class ApiSmokeTest {
         .andExpect(jsonPath("$.code").value(0))
         .andExpect(jsonPath("$.data.nodes[0].name").value("Redis"))
         .andExpect(jsonPath("$.data.links[0].relationType").value("RELATED"));
+  }
+
+  @Test
+  void knowledgeAskRunsThrough() throws Exception {
+    when(knowledgeQaService.answer(org.mockito.ArgumentMatchers.eq(1L), anyString()))
+        .thenReturn("Redis 快主要因为内存访问、单线程事件循环和高效数据结构。");
+
+    mockMvc.perform(post("/api/knowledge/ask")
+            .param("userId", "1")
+            .contentType(TEXT_PLAIN)
+            .content("Redis 为什么快？"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value(0))
+        .andExpect(jsonPath("$.data").value("Redis 快主要因为内存访问、单线程事件循环和高效数据结构。"));
   }
 
   @Test

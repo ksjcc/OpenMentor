@@ -16,7 +16,7 @@ services:
       PGVECTOR_DATABASE: career_vector
       PGVECTOR_USERNAME: postgres
       PGVECTOR_PASSWORD: 12345
-      AI_EMBEDDING_MODEL: text-embedding-v3
+      AI_EMBEDDING_MODEL: bge-m3
       AI_EMBEDDING_DIMENSIONS: 1024
     depends_on:
       - redis
