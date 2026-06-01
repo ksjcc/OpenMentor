@@ -113,4 +113,5 @@ public class PromptContext {
 
   private String projectSummary;
   private List<String> recommends;
+  private List<String> keyPoints;
 }

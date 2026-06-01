@@ -109,6 +109,95 @@ public class PromptBuilder {
         "6. 不要输出多余开场白");
   }
 
+  public String buildReviewPlanPrompt(PromptContext context) {
+    PromptContext promptContext = emptyIfNull(context);
+    return """
+        【角色】
+        你是一个专业的技术学习规划师。
+
+        你的职责：
+        1. 围绕用户当前最核心的薄弱点制定短周期学习计划
+        2. 让计划与目标岗位要求保持一致
+        3. 每天都给出明确、可执行、可检查的训练任务
+        4. 结合已有闪卡与知识点，避免空泛建议
+
+        ====================================
+        【目标岗位】
+        ====================================
+
+        %s
+
+        ====================================
+        【经验阶段】
+        ====================================
+
+        %s
+
+        ====================================
+        【学习偏好】
+        ====================================
+
+        %s
+
+        ====================================
+        【当前薄弱点】
+        ====================================
+
+        %s
+
+        ====================================
+        【推荐复习顺序】
+        ====================================
+
+        %s
+
+        ====================================
+        【可用知识卡片 / 重点】
+        ====================================
+
+        %s
+
+        ====================================
+        【任务】
+        ====================================
+
+        请输出一个 3 到 5 天的结构化学习计划。
+
+        输出要求：
+        1. 必须输出合法 JSON
+        2. 不要输出 Markdown
+        3. 不要输出解释性文字
+        4. 每一天都要有 focus、task、checkpoints、estimatedMinutes
+        5. task 要足够具体，能直接执行
+        6. checkpoints 要能用于自查
+
+        JSON 格式如下：
+        {
+          "title": "",
+          "summary": "",
+          "totalDays": 0,
+          "dailyMinutes": 0,
+          "focusAreas": ["", ""],
+          "steps": [
+            {
+              "dayIndex": 1,
+              "focus": "",
+              "task": "",
+              "checkpoints": ["", ""],
+              "estimatedMinutes": 0
+            }
+          ],
+          "successCriteria": ["", ""]
+        }
+        """.formatted(
+        safe(promptContext.getTargetRole()),
+        safe(promptContext.getRawInput()),
+        safe(promptContext.getSummaryMd()),
+        joinInlineList(promptContext.getRecommends()),
+        joinInlineList(promptContext.getKeyPoints()),
+        joinList(promptContext.getRagMemories()));
+  }
+
   public String buildHarderQuestionPrompt(PromptContext context) {
     PromptContext promptContext = emptyIfNull(context);
     return """
@@ -604,6 +693,7 @@ public class PromptBuilder {
       case PromptTemplates.TASK_GRAPH_EXTRACTION -> buildGraphExtractionPrompt(promptContext);
       case PromptTemplates.TASK_COMMUNITY_REPORT -> buildCommunityReportPrompt(promptContext);
       case PromptTemplates.TASK_DRIFT_QUERY -> buildDriftQuestionPrompt(promptContext);
+      case PromptTemplates.TASK_REVIEW_PLAN -> buildReviewPlanPrompt(promptContext);
       default -> buildQuestionPrompt(promptContext);
     };
   }

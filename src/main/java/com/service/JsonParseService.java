@@ -6,6 +6,7 @@ import com.common.BizException;
 import com.common.ErrorCode;
 import com.dto.graphrag.CommunityReportResult;
 import com.dto.graphrag.GraphExtractionResult;
+import com.dto.dashboard.LearningPlanDTO;
 import com.dto.extraction.KnowledgeExtractionResult;
 import com.dto.profile.ProfileUpdatePatchDTO;
 import com.dto.score.ScoreResultDTO;
@@ -183,6 +184,18 @@ public class JsonParseService {
       throw new BizException(
           ErrorCode.INTERNAL_ERROR,
           "解析画像更新 Patch JSON 失败：" + e.getMessage());
+    }
+  }
+
+  public LearningPlanDTO parseLearningPlan(String json) {
+    try {
+      return guardService.validate(
+          normalizeJson(json),
+          LearningPlanDTO.class);
+    } catch (Exception e) {
+      throw new BizException(
+          ErrorCode.INTERNAL_ERROR,
+          "解析学习计划 JSON 失败：" + e.getMessage());
     }
   }
 

@@ -1,6 +1,7 @@
 package com.controller;
 
 import com.common.Result;
+import com.dto.dashboard.LearningRecommendationDTO;
 import com.service.ReviewService;
 import com.service.Dashboard.FlashcardService;
 
@@ -30,6 +31,12 @@ public class ReviewController {
     @GetMapping("/today")
     public Result<?> today(@RequestParam Long userId) {
         return Result.success(flashcardService.getTodayReview(userId));
+    }
+
+    @GetMapping("/plan")
+    @Operation(summary = "生成学习计划")
+    public Result<LearningRecommendationDTO> plan(@RequestParam Long userId) {
+        return Result.success(reviewService.generatePlan(userId));
     }
 
     /**

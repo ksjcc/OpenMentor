@@ -73,6 +73,8 @@ public class DashboardService {
     // =========================
     dashboard.setAiSuggestions(
         buildSuggestions(userId));
+    dashboard.setLearningRecommendation(
+        learningRecommendationService.generate(userId));
 
     // =========================
     // 5. 薄弱点排行

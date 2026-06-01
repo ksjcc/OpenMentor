@@ -16,6 +16,7 @@ public final class PromptTemplates {
     public static final String TASK_GRAPH_EXTRACTION = "GRAPH_EXTRACTION";
     public static final String TASK_COMMUNITY_REPORT = "COMMUNITY_REPORT";
     public static final String TASK_DRIFT_QUERY = "DRIFT_QUERY";
+    public static final String TASK_REVIEW_PLAN = "REVIEW_PLAN";
 
     private PromptTemplates() {
     }

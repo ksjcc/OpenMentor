@@ -18,4 +18,6 @@ public class LearningRecommendationDTO {
   private List<FlashcardDTO> flashcards;
   // 岗位补短板建议
   private List<String> roleGapSuggestions;
+  // 结构化学习计划
+  private LearningPlanDTO learningPlan;
 }
