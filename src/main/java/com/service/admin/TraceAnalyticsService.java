@@ -6,6 +6,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.stereotype.Service;
+
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.dto.admin.TraceDashboardDTO;
 import com.entity.Trace.TraceEventEntity;
@@ -13,9 +15,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mapper.TraceEventMapper;
 
+import lombok.RequiredArgsConstructor;
+
+@Service
+@RequiredArgsConstructor
 public class TraceAnalyticsService {
   private final TraceEventMapper traceEventMapper;
-  private final ObjectMapper objectMapper;
+  private final ObjectMapper objectMapper = new ObjectMapper();
 
   public TraceDashboardDTO analyzeRecent(int days) {
     LocalDateTime start = LocalDateTime.now().minusDays(days);

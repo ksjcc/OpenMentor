@@ -20,6 +20,7 @@ import com.mapper.FlashcardMapper;
 import com.mapper.InterviewSessionMapper;
 import com.mapper.MemoryProfileJsonMapper;
 import com.mapper.UserProfileMapper;
+import com.service.JsonParseService;
 
 import lombok.RequiredArgsConstructor;
 
@@ -52,6 +53,7 @@ public class DashboardService {
   private final FlashcardMapper flashcardMapper;
   private final LearningRecommendationService learningRecommendationService;
   private final ObjectMapper objectMapper;
+  private final JsonParseService jsonParseService;
 
   /**
    * 获取 Dashboard 数据
@@ -309,7 +311,7 @@ public class DashboardService {
     }
 
     try {
-      KnowledgeExtractionResult extraction = objectMapper.readValue(summaryJson, KnowledgeExtractionResult.class);
+      KnowledgeExtractionResult extraction = jsonParseService.parseExtractionLenient(summaryJson);
       if (extraction.getWeaknesses() == null) {
         return;
       }

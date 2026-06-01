@@ -38,6 +38,7 @@ public class ProfileMergeService {
   private final MemoryProfileJsonMapper memoryProfileJsonMapper;
   private final UserProfileMapper userProfileMapper;
   private final ObjectMapper objectMapper;
+  private final JsonParseService jsonParseService;
 
   @Transactional(rollbackFor = Exception.class)
   public String mergeAndSave(Long userId, KnowledgeExtractionResult extraction) {
@@ -180,9 +181,7 @@ public class ProfileMergeService {
 
     try {
 
-      ProfileUpdatePatchDTO patch = objectMapper.readValue(
-          profileUpdate,
-          ProfileUpdatePatchDTO.class);
+      ProfileUpdatePatchDTO patch = jsonParseService.parseProfileUpdatePatch(profileUpdate);
 
       applyPatch(
           profile,
