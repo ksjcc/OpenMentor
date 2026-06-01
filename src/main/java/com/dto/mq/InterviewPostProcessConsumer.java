@@ -6,6 +6,7 @@ import com.entity.InterviewSession;
 import com.entity.UserProfile;
 import com.mapper.InterviewSessionMapper;
 import com.service.*;
+import com.service.Dashboard.FlashcardService;
 import com.service.garphrag.GraphCommunityService;
 import com.service.garphrag.GraphRagIndexerService;
 import com.dto.graph.KnowledgeGraphBuilder;

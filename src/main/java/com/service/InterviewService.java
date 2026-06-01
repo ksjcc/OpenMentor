@@ -10,10 +10,12 @@ import com.dto.InterviewReplyDTO;
 import com.dto.graph.KnowledgeGraphBuilder;
 import com.entity.InterviewMessage;
 import com.entity.InterviewSession;
+import com.entity.UserProfile;
 import com.ai.agent.FollowUpAgent;
 import com.ai.agent.ScoreAgent;
 import com.mapper.InterviewMessageMapper;
 import com.mapper.InterviewSessionMapper;
+import com.service.Dashboard.FlashcardService;
 import com.service.cache.AiRateLimitService;
 import com.service.cache.InterviewMemoryCacheService;
 
@@ -55,6 +57,7 @@ public class InterviewService {
         private final InterviewPostProcessProduce interviewPostProcessProduce;
         private final InterviewMemoryCacheService interviewMemoryCacheService;
         private final AiRateLimitService aiRateLimitService;
+        private final ProfileService profileService;
 
         /**
          * 创建一场新的面试，并生成第一道问题
@@ -66,8 +69,9 @@ public class InterviewService {
          * @return 第一题
          */
         @Transactional(rollbackFor = Exception.class)
-        public InterviewReplyDTO startInterview(Long userId, String interviewType, String targetRole, String topic) {
-                validateStartRequest(userId, interviewType, targetRole, topic);
+        public InterviewReplyDTO startInterview(Long userId, String interviewType, String targetRole, String topic,
+                        String projectSummary) {
+                validateStartRequest(userId, interviewType, targetRole, topic, projectSummary);
 
                 // 1.创建面试
                 InterviewSession session = new InterviewSession();
@@ -83,7 +87,7 @@ public class InterviewService {
                 }
 
                 // 2.调用agent编排器生成第一题目
-                String question = agentOrchestrator.generateFirstQuestion(userId, topic);
+                String question = agentOrchestrator.generateFirstQuestion(userId, topic, targetRole, projectSummary);
                 if (isBlank(question)) {
                         throw new BizException(ErrorCode.INTERNAL_ERROR, "AI未生成面试问题");
                 }
@@ -122,7 +126,7 @@ public class InterviewService {
                 validateRequired(sessionId, "面试ID不能为空");
                 validateText(topic, "面试主题不能为空");
                 validateText(answer, "回答内容不能为空");
-                assertSessionInProgress(userId, sessionId);
+                InterviewSession session = assertSessionInProgress(userId, sessionId);
 
                 // 1. AI 调用限流：本接口会触发评分 Agent、追问决策 Agent、面试官 Agent。
                 // 超过每分钟 10 次时直接抛出业务异常，不再继续写入回答或调用 AI。
@@ -155,7 +159,11 @@ public class InterviewService {
                 // 6. 调用 AgentOrchestrator：
                 // 评分 → 决策 → 生成追问/下一题
                 OrchestratorResult result = agentOrchestrator.handleAnswerWithMultiAgentDecision(userId, sessionId,
-                                topic, question, answer, memoryService.getLatestProfileJson(userId),
+                                topic,
+                                session.getTargetRole(),
+                                loadResumeText(userId),
+                                buildProjectSummary(userId),
+                                question, answer, memoryService.getLatestProfileJson(userId),
                                 memoryService.getLatestSummaryMd(userId, "overall"));
                 InterviewReplyDTO reply = new InterviewReplyDTO();
                 reply.setSessionId(sessionId);
@@ -430,7 +438,24 @@ public class InterviewService {
                 return session;
         }
 
-        private void validateStartRequest(Long userId, String interviewType, String targetRole, String topic) {
+        private String loadResumeText(Long userId) {
+                UserProfile profile = profileService.getProfile(userId);
+                return profile == null ? null : profile.getResumeText();
+        }
+
+        private String buildProjectSummary(Long userId) {
+                UserProfile profile = profileService.getProfile(userId);
+                if (profile == null) {
+                        return null;
+                }
+                if (!isBlank(profile.getResumeText())) {
+                        return profile.getResumeText();
+                }
+                return memoryService.getLatestSummaryMd(userId, "overall");
+        }
+
+        private void validateStartRequest(Long userId, String interviewType, String targetRole, String topic,
+                        String projectSummary) {
                 validateRequired(userId, "用户ID不能为空");
                 validateText(interviewType, "面试类型不能为空");
                 validateText(targetRole, "目标岗位不能为空");

@@ -1,4 +1,4 @@
-package com.service;
+package com.service.Dashboard;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.dto.extraction.FlashcardDTO;
@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 闪卡服务
@@ -65,6 +66,25 @@ public class FlashcardService {
                         .eq(Flashcard::getUserId, userId)
                         .le(Flashcard::getNextReviewTime, LocalDateTime.now())
                         .orderByAsc(Flashcard::getNextReviewTime));
+    }
+
+    public List<FlashcardDTO> findByTopic(Long userId, String topic) {
+        if (isBlank(topic)) {
+            return List.of();
+        }
+
+        String normalizedTopic = topic.trim().toLowerCase(Locale.ROOT);
+
+        return flashcardMapper.selectList(
+                new LambdaQueryWrapper<Flashcard>()
+                        .eq(Flashcard::getUserId, userId)
+                        .orderByDesc(Flashcard::getId)
+                        .last("LIMIT 50"))
+                .stream()
+                .filter(card -> containsTopic(card, normalizedTopic))
+                .map(this::toDto)
+                .limit(5)
+                .toList();
     }
 
     /**
@@ -125,5 +145,22 @@ public class FlashcardService {
 
     private boolean isBlank(String value) {
         return value == null || value.isBlank();
+    }
+
+    private boolean containsTopic(Flashcard card, String normalizedTopic) {
+        return containsText(card.getQuestion(), normalizedTopic)
+                || containsText(card.getAnswer(), normalizedTopic);
+    }
+
+    private boolean containsText(String text, String normalizedTopic) {
+        return text != null && text.toLowerCase(Locale.ROOT).contains(normalizedTopic);
+    }
+
+    private FlashcardDTO toDto(Flashcard card) {
+        FlashcardDTO dto = new FlashcardDTO();
+        dto.setQuestion(card.getQuestion());
+        dto.setAnswer(card.getAnswer());
+        dto.setDifficulty(card.getDifficulty());
+        return dto;
     }
 }

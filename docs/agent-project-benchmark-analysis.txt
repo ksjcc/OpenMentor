@@ -1,0 +1,775 @@
+Agent 项目对照分析（基于你提供的深读思考图 + 当前 AgentCareer 仓库代码）
+日期：2026-05-31
+
+一、先说结论
+
+图里的几个项目，真正厉害的地方不在于“用了 LLM / Agent / RAG”，而在于它们都把下面四件事讲清楚了：
+
+1. 这个项目到底瞄准了哪个具体难题，不是泛泛地做一个 AI 系统。
+2. 为了解这个难题，专门设计了什么机制，而不是简单拼框架。
+3. 最终效果怎么证明，通常会给出离线评测、线上指标、延迟或稳定性数据。
+4. 系统怎么稳定运行，尤其是 runtime、memory、retrieval、fallback、trace、verification 这些工程化能力。
+
+对照当前项目来看，我们已经有不错的底子，尤其是在“面试场景多阶段编排 + 检索计划 + GraphRAG + 记忆 + 复盘闭环”上已经具备雏形；但如果想达到图中这些项目的完成度和说服力，还需要把“主问题定义、可验证指标、运行时控制、记忆分层、故障处理、观测闭环”再往前推进一大步。
+
+
+二、图中几个项目分别在强调什么
+
+1. MindWiki
+
+项目重点：
+- 重点不只是“做了一个知识库”，而是把文档理解链条做深了：解析、切块、检索、重排、评测全部细化。
+
+解决的问题：
+- 普通 RAG 在复杂 PDF、表格、跨页内容上很容易切坏、召回不准、证据不稳。
+- 这个项目在解决“复杂文档如何被准确拆开、被稳定检索、被量化优化”的问题。
+
+项目定位：
+- 面向 Markdown / PDF 知识库场景的工程型 RAG 系统。
+- 更偏“高质量知识处理基础设施”，不是单纯聊天机器人。
+
+技术亮点：
+- 分层文档解析链路：原始解析 + OCR + 表格结构化 + 页面文本重建。
+- 结构化语义 Chunk：不是简单按长度切，而是考虑段落、标题、子主题边界。
+- 查询理解 + 子查询拆分：不是只做向量检索，而是先理解用户问法。
+- 混合召回 + RRF / rerank：说明它关心检索排序质量。
+- 建了 chunk-level 检索评测集，并用 Recall@K、MRR、nDCG、Hit@K 证明效果。
+
+一句话总结：
+- MindWiki 的核心竞争力是“文档理解深度 + 检索评测体系”。
+
+
+2. InDepth
+
+项目重点：
+- 重点是 Agent Runtime，而不是某一个具体 Agent。
+
+解决的问题：
+- 多步骤复杂任务中，单轮 prompt 很难稳定完成规划、执行、反思、重试、验证。
+- 这个项目在解决“复杂 Agent 如何像一个可控系统一样运行”的问题。
+
+项目定位：
+- 面向复杂任务执行的 Agent Runtime / Agent OS。
+- 更偏底层运行框架，而不是上层垂直业务。
+
+技术亮点：
+- task graph + node state 的显式执行框架。
+- Plan-Solve / ReAct / Reflexion 被映射到清晰的阶段与状态。
+- prompt 契约化设计：base + phase + dynamic。
+- 三层记忆体系：runtime memory、long-term memory、user preference。
+- 上下文压缩链路，不是无限堆上下文。
+- tool -> skills 的扩展机制。
+- search guard / session budget / stop threshold 这类运行时约束。
+- tracing + verifier，把执行过程和结果验证都纳入工程闭环。
+
+一句话总结：
+- InDepth 的核心竞争力是“可观测、可控、可恢复的 Agent Runtime”。
+
+
+3. OpenSynapse
+
+项目重点：
+- 重点是“知识管理与学习闭环”中的系统稳定性、低延迟和多服务治理。
+
+解决的问题：
+- 知识类 AI 产品常见问题是：模型服务不稳、检索成本高、响应慢、用户学习链路断裂。
+- 这个项目在解决“一个 AI 学习平台如何稳定、便宜、快地跑起来”的问题。
+
+项目定位：
+- 面向知识工作者的 AI 学习伙伴 / AI 知识管理平台。
+- 更偏产品化、平台化，而不只是算法实验。
+
+技术亮点：
+- 模型网关 + 多供应商适配 + 故障转移。
+- RAG 插槽判断：对短消息、寒暄、非知识查询跳过检索，控制 TTFT 和成本。
+- 向量检索 + 全文检索 + RRF 融合，强调召回提升。
+- SSE 流式输出，并关注首包延迟和中断响应。
+- MCP Server，对外开放知识库能力。
+
+一句话总结：
+- OpenSynapse 的核心竞争力是“平台级稳定性 + 成本/延迟治理 + 产品闭环”。
+
+
+4. 多智能体膳食与营养助手
+
+项目重点：
+- 重点是多 Agent 协作编排，以及复杂子任务（尤其 Text2SQL）的闭环稳定性。
+
+解决的问题：
+- 多意图请求、结构化查询、复杂协作任务很容易在中间步骤失败。
+- 这个项目在解决“复杂任务如何拆解、多 Agent 如何协同、失败后如何恢复”的问题。
+
+项目定位：
+- 面向垂直领域的多智能体应用系统。
+- 不是通用 Agent OS，而是“领域任务编排 + 高价值闭环”。
+
+技术亮点：
+- Router + Planner 的混合编排。
+- Human-in-the-Loop：用户意图模糊时主动追问。
+- Text2SQL 双层容错：内层 self-reflection，外层 replan。
+- 多模态 RAG：文本 / 图片 / 表格统一纳入知识链路。
+- Cross-encoder rerank + RAGAS 自动化评测。
+- 双层记忆：滑动窗口 + 长期偏好记忆。
+
+一句话总结：
+- 这个项目的核心竞争力是“多 Agent 任务闭环 + 垂直场景容错设计”。
+
+
+5. 智能文物讲解助手
+
+项目重点：
+- 重点是领域多模态理解，而不是泛化 Agent 能力。
+
+解决的问题：
+- 通用视觉模型对细粒度文物特征区分不够强，知识回答也不够专业。
+- 这个项目在解决“领域图像理解 + 领域知识回答”的精度问题。
+
+项目定位：
+- 面向文博场景的多模态 RAG / VLM 应用。
+- 强调领域适配，而不是通用大而全。
+
+技术亮点：
+- Chinese-CLIP 细粒度特征微调。
+- Qwen2.5-VL 指令微调。
+- 多阶段混合检索 + W-RRF + reranker。
+- 端到端指标：BERTScore、关键信息准确率。
+
+一句话总结：
+- 这个项目的核心竞争力是“领域适配 + 多模态精度优化”。
+
+
+三、这些项目的共性规律
+
+如果把上面几个项目抽象一下，它们共同在做三件事：
+
+1. 先把“主战场”缩得很小很清楚
+- MindWiki：复杂文档 RAG。
+- InDepth：复杂任务 Agent Runtime。
+- OpenSynapse：知识学习平台的稳定性与检索治理。
+- 营养助手：多 Agent 协作和 Text2SQL 闭环。
+- 文物助手：文博场景多模态问答。
+
+2. 再围绕这个主战场打一套专用机制
+- 不是“我也用了 LangGraph / RAG / 向量库”，而是“我为什么这样设计”。
+
+3. 最后用指标证明
+- 提升了多少召回、降低了多少延迟、节省了多少成本、提升了多少准确率、增强了多少稳定性。
+
+这也是当前项目最应该补的地方：不是继续加功能，而是要把主问题、机制和证据连起来。
+
+
+四、当前 AgentCareer 项目的现状画像
+
+1. 当前项目实际在做什么
+
+从仓库代码来看，这个项目已经不是单点功能，而是一个“面试陪练 + 知识问答 + 记忆沉淀 + GraphRAG + 复习闭环”的职业成长系统，核心链路大致是：
+
+- 面试开始：生成首题。
+- 面试过程：评分 -> 检索规划 -> GraphRAG/记忆补充 -> 决策聚合 -> prompt 组装 -> 追问/下一题生成。
+- 面试结束：知识提炼 -> 长期记忆更新 -> 闪卡/复盘。
+- 平时学习：知识问答、图谱查看、Dashboard、复习建议。
+
+按当前代码模块看，已具备这些基础能力：
+
+- 多阶段编排：
+  AgentOrchestrator 已经把 scoring、retrievalPlanning、graphRagEnrichment、decisioning、aggregation、promptAssembly、generation 拆成流水线。
+
+- 检索计划：
+  RetrievalPlanningService 不只是写死规则，而是尝试让 LLM 先输出 intent / complexity / contextDependency 信号，再映射为 retrieval plan。
+
+- 混合检索：
+  HybridRetriever 已经支持 memory / vector / graph 的主副检索组合、HyDE、keyword fallback、rerank、budget guard。
+
+- GraphRAG：
+  已有 query classifier、retriever router、search guard、community rebuild、community report 这套基本结构。
+
+- 记忆体系：
+  已有 Redis 短期会话上下文 + MySQL summary/profile + pgvector 语义记忆的雏形。
+
+- 异步后处理：
+  finishInterview 后通过 MQ 做后处理，说明你已经在考虑主链路时延与异步解耦。
+
+- Trace 雏形：
+  已经在 orchestrator pipeline 中记录 trace event，并异步持久化到 trace_event 表。
+
+2. 当前项目真正适合的定位
+
+如果要提炼成一句话，我认为当前项目最适合的定位不是“通用 Agent 平台”，而是：
+
+“面向技术求职/成长场景的 AI 面试与学习闭环系统，重点解决多轮面试中的实时追问决策、个性化记忆检索和面后复盘沉淀问题。”
+
+这个定位比“我做了两个系统”更强，因为它把所有功能都串进一个业务闭环：
+
+- 面试前：画像与目标岗位。
+- 面试中：实时问题生成、追问、检索增强。
+- 面试后：知识提炼、长期记忆、薄弱点聚合、复习建议。
+- 平时：知识问答、闪卡复习、图谱查看。
+
+3. 当前项目已有的技术亮点
+
+如果只看已有代码，不夸张地说，当前项目已经可以总结出下面这些亮点：
+
+- 面试场景多阶段编排，而不是单 prompt 问答。
+- 检索前先做 retrieval planning，而不是固定一个检索器硬查。
+- 引入 GraphRAG mode、query classifier、search guard、retrieval budget，说明开始关注实时场景中的成本与时延约束。
+- 把短期上下文、长期 profile、summary、memory chunk 分开存储，说明已具备记忆分层意识。
+- 面试结束后异步做知识提炼、记忆更新和复习闭环，说明不是一次性回答系统。
+- 你最近补的 trace analytics 方向，正好能把“运行时工程能力”讲出来。
+
+
+五、在时间有限的前提下，当前项目应该优先改什么，按什么顺序改
+
+我建议把后续工作统一收束成一个目标：
+
+推荐主目标：
+- 把 AgentCareer 打造成一个“面向技术面试场景的个性化 AI 面试与成长闭环系统”，重点证明它在多轮面试中的追问决策、个性化检索和面后复盘上，比普通问答式系统更稳定、更贴人、更可量化验证。
+
+基于这个目标，我建议后续工作严格按下面四个优先级推进。
+
+1. 第一优先级：先把“检索 + 追问决策”做成项目最能站得住的核心亮点
+
+这一阶段建议按下面几个实施步骤推进：
+
+- 第一步，先把“追问决策链路”拆清楚并画成固定流程。
+  需要把当前 answerQuestion 相关链路进一步拆成几个明确判断点：
+  用户回答进入后，先判断回答长度、答题完整度、是否偏题、是否需要继续追问；
+  然后判断当前问题属于基础知识、项目经验、系统设计还是简历细节；
+  再判断当前轮次是否需要引入历史记忆、是否需要走知识检索、是否需要启用 graph mode；
+  最后再决定生成“追问”“下一题”还是“澄清问题”。
+  这一部分最好画成一张非常具体的决策流程图，后面无论做代码优化、写文档、做答辩，都以这张图为核心。
+
+- 第二步，把 retrieval planning 从“模型辅助判断”细化成“规则 + 模型信号结合”的可执行策略。
+  可以先把 planner 输出统一成几个结构化字段，比如：
+  intent、complexity、contextDependency、needMemory、needRetrieval、retrievalMode、graphMode、expectedBudget。
+  然后把每个字段的落地逻辑写清楚：
+  如果用户回答非常短，只触发轻量判断，不直接走重检索；
+  如果问题和上一轮强相关，提高 recent context 和 memory 的权重；
+  如果是系统设计、多跳知识点、跨主题延展问题，再考虑 graph mode；
+  如果问题只是确认、寒暄、澄清，不启动完整混合检索。
+  这一阶段不要求 planner 非常智能，但要求输出结构稳定、策略边界清晰、方便后续评测。
+
+- 第三步，对 HybridRetriever 做一轮面向面试场景的整理。
+  重点不是重写整个检索器，而是把当前已有能力重新组织成几类标准模式：
+  memory-first 模式，用于跨轮追问、历史弱点追问、简历项目追问；
+  vector-first 模式，用于基础知识点、单点技术问答；
+  graph-assisted 模式，用于系统设计、多跳关联、上下游知识扩展；
+  fallback 模式，用于 graph 超时、向量召回差、结果为空等情况。
+  每种模式都要明确：
+  谁是 primary retriever，
+  谁是 secondary retriever，
+  什么时候触发 rerank，
+  预算怎么扣减，
+  什么情况下直接降级。
+
+- 第四步，给“是否追问”单独加一层判断逻辑，不要让它完全等同于“再生成一个问题”。
+  这一层建议至少引入三个信号：
+  回答质量信号，例如是否答到关键点、是否有明显遗漏、是否表述模糊；
+  面试节奏信号，例如已经连续追问几轮、当前主题是否该收束、用户是否出现明显卡顿；
+  个性化信号，例如用户过去是否在这个知识点反复失分、当前岗位是否特别看重这个能力。
+  有了这层判断后，系统才能更自然地区分：
+  继续深挖、
+  切换角度追问、
+  结束当前题进入下一题、
+  先补一个澄清问题。
+
+- 第五步，建立第一版面试检索评测集。
+  不需要一开始就做成大规模基准，先做一个小而精的数据集更现实。
+  建议先整理 50 到 100 条样本，每条样本包含：
+  当前问题、
+  用户回答、
+  用户历史画像或历史弱点摘要、
+  理想检索来源，
+  理想追问方向，
+  标注好的相关知识片段或记忆片段。
+  样本类型要尽量覆盖：
+  直接知识点追问、
+  基于弱点的追问、
+  基于项目经历的追问、
+  跨轮上下文追问、
+  系统设计类问题、
+  无需检索的短回复。
+  这一步的重点不是数据量，而是样本结构足够规范，后面可以重复跑。
+
+- 第六步，跑第一版对比实验并形成结果表。
+  至少要比较下面几组：
+  memory only、
+  vector only、
+  graph only、
+  hybrid、
+  hybrid + rerank、
+  retrieval planning 开启和关闭。
+  指标先不要铺太多，优先跑：
+  Recall@K、MRR、Hit@K，
+  以及回答后下一题生成耗时。
+  如果时间还允许，可以再加一个“追问相关性”的人工打分维度。
+
+这一阶段完成后的交付物应该包括：
+- 一张追问决策流程图。
+- 一份 retrieval planning 结构化字段设计说明。
+- 一套标准化 retrieval mode 配置。
+- 一份 50 到 100 条的离线评测样本集。
+- 一张检索效果对比表和 1 到 2 个典型 case 分析。
+
+2. 第二优先级：再把评测和 trace 打通，让项目从“功能存在”升级为“效果可证明”
+
+这一阶段建议按下面几个实施步骤推进：
+
+- 第一步，先统一 trace 的事件模型。
+  现在已经有 TraceContext、TracePersistenceService、TraceAnalyticsService 雏形，下一步需要把埋点字段规范下来。
+  每个关键 stage 至少要统一记录：
+  stageName、
+  startTime、
+  endTime、
+  latency、
+  status、
+  fallbackUsed、
+  plannerDecision、
+  retrievalMode、
+  graphMode、
+  budgetConsumed、
+  resultSummary、
+  errorReason。
+  这样后面做统计时，不会出现不同阶段字段不统一、没法横向比较的问题。
+
+- 第二步，补“决策类 trace”，不要只记耗时。
+  当前最需要留下来的，不只是一个阶段用了多少毫秒，而是这个阶段做了什么判断。
+  比如：
+  retrieval planner 为什么判定 needRetrieval=true；
+  为什么给当前问题分配 graph mode；
+  为什么触发 fallback；
+  为什么最终生成的是追问而不是下一题。
+  这些决策信息后面会直接成为 bad case 分析的依据。
+
+- 第三步，建立一套最小运行指标面板。
+  这一步哪怕先不做正式前端页面，也至少要能通过接口、SQL 聚合或者简单管理页看到：
+  首题生成耗时、
+  回答后下一题生成耗时、
+  各 stage latency 分布、
+  fallback rate、
+  budget exhaustion rate、
+  graph mode 触发率、
+  retrieval planning 跳检索比例、
+  无检索直出比例。
+  如果能再补一层 P50、P95、P99，会更像成熟系统。
+
+- 第四步，建立样本池，而不是只看平均值。
+  平均值只能说明大盘情况，真正有价值的是样本。
+  建议至少维护三类样本池：
+  慢样本池，专门收集尾延迟高的会话；
+  fallback 样本池，收集 graph/vector/memory/LLM 等降级场景；
+  bad case 样本池，收集追问偏题、检索不准、总结不完整等质量问题。
+  每条样本最好都能回溯到完整 trace，能看到当时各阶段的判断和输出。
+
+- 第五步，把离线评测结果和线上 trace 结果接到一起。
+  离线评测解决的是“方案本身值不值”；
+  trace 解决的是“线上跑起来稳不稳”。
+  最终要做到的是：
+  一次策略改动后，既能看到离线指标有没有提升，
+  也能看到线上 latency、fallback rate、graph mode 使用分布有没有恶化。
+  只有这样，后面的优化才不会只顾质量不顾性能，或者只顾速度不顾效果。
+
+- 第六步，形成固定分析节奏。
+  每次迭代 retrieval planning、hybrid retrieval、graph mode 或 prompt assembly 后，都固定做一次分析：
+  看指标变化，
+  抽 5 到 10 个样本复盘，
+  记录这次改动带来的正向提升和副作用。
+  把这件事做成固定流程，项目就会逐步从“凭感觉调参数”转成“有证据地迭代”。
+
+这一阶段完成后的交付物应该包括：
+- 一套统一的 trace 事件字段定义。
+- 一组可持续产出的运行时指标。
+- 三类可回溯样本池。
+- 一份把离线评测和线上 trace 关联起来的分析模板。
+
+3. 第三优先级：把 runtime 从“多阶段 pipeline”补成“可恢复的执行系统”
+
+这一阶段建议按下面几个实施步骤推进：
+
+- 第一步，先给现有 pipeline 加一层统一的阶段状态模型。
+  不需要一下子改成很重的状态机框架，但至少要在 orchestration 层定义统一状态：
+  pending、
+  running、
+  success、
+  failed、
+  skipped、
+  fallback。
+  然后让 scoring、retrievalPlanning、graphRagEnrichment、decisioning、aggregation、promptAssembly、generation 这些阶段都按统一状态上报。
+  这样 trace、异常处理、后续统计才有共同语言。
+
+- 第二步，补每个关键阶段的输入输出契约。
+  当前项目已经有多阶段调用，但下一步要把每一阶段的输入和输出尽量结构化。
+  例如 retrieval planning 阶段明确输出：
+  是否检索、
+  采用哪种 retrieval mode、
+  budget 上限、
+  是否启用 graph、
+  是否需要历史记忆。
+  generation 阶段明确输出：
+  当前动作类型，
+  生成内容，
+  置信程度，
+  是否建议继续追问。
+  这样做的目的是减少“上游返回一点模糊信息，下游自己猜着用”的情况。
+
+- 第三步，给关键阶段补 verifier。
+  verifier 不一定要复杂，但至少要覆盖几个最常见的风险点：
+  planner 输出字段是否完整，
+  JSON 是否合法，
+  检索结果是否为空，
+  prompt assembly 是否缺关键上下文，
+  generation 结果是否满足预期结构。
+  如果 verifier 发现问题，不直接让主链路崩掉，而是进入默认策略或降级路径。
+
+- 第四步，把失败后的降级路径明确写出来。
+  这一步建议直接列成一张“异常 -> 处理动作”表，便于实现和验证。
+  例如：
+  planner 输出异常 -> 使用默认 retrieval mode；
+  graph 检索超时 -> 回退到 vector 或 memory；
+  rerank 失败 -> 保留未 rerank 的 topK；
+  memory miss -> 仅依赖 recent context；
+  generation 非法结构 -> 重试一次或切换简化 prompt；
+  trace 持久化失败 -> 不阻塞主链路，只打告警。
+  这张表一旦明确，代码里的 fallback 逻辑就不会散落在各处。
+
+- 第五步，对“无需复杂执行”的情况做轻量路径。
+  并不是每个用户回答都值得走完整 pipeline。
+  建议显式定义几类轻量路径：
+  超短回复路径、
+  澄清问题路径、
+  明确结束当前题路径、
+  无需检索直出路径。
+  这样既能降低延迟，也能减少系统对不必要复杂流程的依赖。
+
+- 第六步，做一次小范围故障注入验证。
+  重点不是做完整混沌工程，而是验证几个最容易出问题的点：
+  LLM 返回非法 JSON、
+  检索超时、
+  Redis miss、
+  pgvector 查询失败、
+  MQ 或 trace 持久化异常。
+  每一种异常都要验证三件事：
+  主链路是否还能走完，
+  是否触发了正确 fallback，
+  trace 里是否留下了可分析记录。
+
+这一阶段完成后的交付物应该包括：
+- 一套统一的阶段状态定义。
+- 一份关键阶段输入输出契约说明。
+- 一张异常处理和 fallback 对照表。
+- 一组覆盖典型异常场景的验证结果。
+
+4. 第四优先级：最后再补记忆分层和更完整的平台治理，不要过早铺太大
+
+这一阶段建议按下面几个实施步骤推进：
+
+- 第一步，重新梳理记忆层次，先把职责边界写清楚。
+  建议至少分成三层：
+  session memory，保存当前面试中的最近轮次、当前主题、最近追问链路；
+  growth memory，保存用户长期薄弱点、常错知识点、典型表达问题、复盘结论；
+  preference/profile，保存岗位方向、技术栈、目标公司、回答风格偏好。
+  这一步先解决“什么信息该存到哪里”，避免后面记忆内容越堆越乱。
+
+- 第二步，制定记忆写入策略，而不是默认把所有东西都写进去。
+  可以按事件类型来定：
+  当前轮次临时上下文写入 session memory；
+  多次重复暴露的弱点写入 growth memory；
+  稳定偏好和长期目标写入 profile/preference；
+  一次性噪声、不稳定表述、价值不高的碎片尽量不入长期记忆。
+  这样做可以显著减少长期记忆污染。
+
+- 第三步，补一层上下文压缩逻辑。
+  当面试轮数变长时，不能简单把所有历史对话拼进 prompt。
+  更合理的做法是把历史信息压成几类关键证据：
+  当前题目的上下文摘要，
+  已经追问过的点，
+  尚未回答清楚的点，
+  与当前问题最相关的历史弱点，
+  与岗位方向最相关的长期偏好。
+  压缩的目标不是“总结得好看”，而是“让后续追问还能保持连续性和个性化”。
+
+- 第四步，给记忆召回补最小评估。
+  不一定马上做很复杂的 benchmark，但至少要能评估：
+  当前追问里有没有真正用到历史弱点，
+  profile/preference 有没有影响问题风格，
+  session summary 有没有帮助跨轮承接。
+  最简单的做法是先抽样人工看，再逐步引入 LLM-as-judge 或结构化标注。
+
+- 第五步，补最必要的平台治理能力。
+  这一步不求全面平台化，但建议优先补最影响稳定性的能力：
+  LLM 超时控制、
+  provider fallback、
+  retrieval 超时降级、
+  依赖服务失败后的保底路径、
+  无价值检索跳过策略。
+  这几项完成后，系统在真实运行中会稳很多。
+
+- 第六步，再根据时间决定是否扩展到体验层优化。
+  如果前面核心链路已经比较稳定，可以继续补：
+  SSE 流式输出、
+  多模型网关、
+  更细的成本统计、
+  更完整的管理后台。
+  如果时间仍然紧张，这些能力可以延后，不影响项目主线成立。
+
+这一阶段完成后的交付物应该包括：
+- 一份三层记忆职责和写入策略说明。
+- 一套上下文压缩规则。
+- 一份记忆命中效果的抽样评估记录。
+- 一组基础平台治理策略和降级方案。
+
+
+六、如果想把项目做成图中那种层次，我建议优先补什么
+
+不要一次性全补，最优做法是围绕一个主叙事分层推进。
+
+P0：先把主叙事打透
+
+推荐统一主叙事为：
+- 个性化 AI 技术面试与成长闭环系统
+
+推荐重点强调三个核心难题：
+- 实时面试中的低延迟追问决策
+- 个性化记忆与 GraphRAG 检索协同
+- 面后知识沉淀与复习闭环
+
+如果这三个难题讲透，项目就不会散。
+
+
+P1：把检索和追问决策做成“能证明有效”的核心亮点
+
+建议补强：
+- retrieval slotting：寒暄、确认句、超短回复时跳过重检索
+- query decomposition：追问场景把问题拆成“当前知识点 + 历史弱点 + 当前回答缺口”
+- graph mode selection 的离线评估
+- hybrid retrieval benchmark 数据集
+- rerank 前后效果对比
+
+目标：
+- 让“为什么要做 retrieval planning + graph budget + hybrid retrieval”有数据支撑。
+
+
+P2：把 runtime 从 pipeline 升级成可恢复的状态机
+
+建议补强：
+- stage state model
+- failure reason taxonomy
+- verifier stage
+- replan strategy
+- 对异常场景的 fallback 路径
+
+目标：
+- 让项目从“多阶段调用”升级为“可控 Agent Runtime”。
+
+
+P3：把 memory 做成真正的差异化能力
+
+建议补强：
+- 三层记忆：session memory / growth memory / user preference
+- memory write policy
+- memory summarization / compression
+- memory recall quality benchmark
+- 将 memory 命中结果反馈到推荐和追问策略
+
+目标：
+- 让“个性化”不是口号，而是系统性能力。
+
+
+P4：把 trace 和 dashboard 打通
+
+建议补强：
+- trace 查询接口
+- trace dashboard
+- 慢阶段分布
+- fallback 统计
+- graph mode 使用分布
+- retrieval plan 分布
+- bad case 样本池
+
+目标：
+- 让观测能力可以支撑迭代，而不是只做埋点存档。
+
+
+P5：按需求决定要不要扩到多模态
+
+如果你想往 MindWiki / 文物助手那条线靠，可以考虑补：
+- 简历 PDF / 项目文档 PDF 解析
+- 项目架构图 / 流程图理解
+- 面试系统设计图辅助追问
+
+但这不是当前最优先项。
+对你这个项目来说，先把“面试 runtime + retrieval + memory + evaluation”打透，收益更高。
+
+
+七、建议补哪些测试
+
+这部分最好单独做，因为图中项目最大的共同点之一，就是“能证明系统有效和稳定”。
+
+1. 单元测试
+
+必须补的单测方向：
+- RetrievalPlanningService
+  覆盖不同 intent / complexity / fallback 分支。
+
+- GraphRagQueryClassifier
+  覆盖 local / global / drift / realtime 等不同问题类型。
+
+- HybridRetriever
+  覆盖 primary / secondary retriever 组合、budget 消耗、HyDE、keyword fallback、rerank 前后逻辑。
+
+- GraphRagSearchGuard / RetrievalBudget
+  覆盖 timeout、search step 耗尽、retriever call 耗尽。
+
+- PromptAssemblyStage
+  覆盖 recent context、profile、summary、graph context 拼装逻辑。
+
+- TracePersistenceService / TraceAnalyticsService
+  覆盖事件持久化、stage usage、fallback rate、平均耗时聚合。
+
+- Post-process 相关
+  覆盖 extraction JSON 解析、memory 更新、flashcard 生成、graph rebuild 的边界条件。
+
+2. 集成测试
+
+建议用 Testcontainers 做：
+- MySQL
+- PostgreSQL / pgvector
+- Redis
+- RabbitMQ
+
+重点测这些链路：
+- startInterview -> answerQuestion -> finishInterview 全链路
+- Redis miss 时回退 MySQL
+- 向量检索失败时是否保底
+- MQ 消费失败时是否可重试
+- 事务提交后再写缓存 / 发消息的行为是否正确
+- trace 持久化是否不影响主流程
+
+3. 离线评测测试
+
+这是最应该补、也是最能拉开差距的一类测试。
+
+建议建立一个面试检索评测集，至少 100 到 200 条样本，样本类型包含：
+- 直接知识点追问
+- 跨轮次追问
+- 结合用户历史弱点的追问
+- 系统设计 / 多跳推理问题
+- 无需检索的寒暄/短回复
+
+评测内容：
+- Recall@K
+- MRR
+- nDCG
+- Hit@K
+- rerank 前后对比
+- 不同 graph mode 对比
+- retrieval planning 开关前后对比
+
+4. 质量评测测试
+
+需要评估“生成结果值不值”，不只是“有没有返回结果”。
+
+建议做评测维度：
+- 追问相关性
+- 追问连续性
+- 个性化程度
+- 知识正确性
+- 总结覆盖率
+- 弱点识别准确性
+
+评测方法：
+- 人工 rubric 打分
+- 或 LLM-as-judge，但要配人工抽检
+
+5. 压测与性能测试
+
+建议测：
+- 首题生成延迟
+- 单轮回答后的下一步生成延迟
+- stage latency 分布
+- P50 / P95 / P99
+- 并发面试 session 下的吞吐
+- 异步后处理积压时的影响
+
+尤其要看：
+- retrieval planning 是否明显增加延迟
+- graph mode 切换是否造成尾延迟
+- trace 持久化对主链路是否零阻塞
+
+6. 容错与故障注入测试
+
+这类测试非常重要，因为它最能体现工程深度。
+
+建议覆盖：
+- LLM 超时
+- LLM 返回非法 JSON
+- 向量库不可用
+- Redis 不可用
+- MQ 延迟/失败
+- graph rebuild 过程中脏数据
+- summary / extraction 字段缺失
+- trace 存储失败
+
+要验证的不是“有没有报错”，而是：
+- 是否正确 fallback
+- 是否正确记录 trace
+- 是否污染主流程
+- 是否影响用户体验
+
+7. 回归测试
+
+建议建立固定场景回归包：
+- Redis 面试主题
+- JVM 面试主题
+- MySQL 面试主题
+- 系统设计追问
+- 简历项目追问
+- 面试结束后的复盘与 dashboard 更新
+
+每次改 planner、prompt、retriever、memory 逻辑时，都跑回归。
+
+
+八、我对当前项目最建议的升级路线
+
+如果目标是“像图中项目那样有深度”，我建议路线不是继续横向加功能，而是按下面顺序纵向打深：
+
+第一阶段：
+- 统一主叙事
+- 建检索评测集
+- 建 trace dashboard
+- 把 retrieval planning / hybrid retrieval / graph budget 的收益量化出来
+
+第二阶段：
+- 做 runtime 状态机 + verifier + replan
+- 做三层记忆与上下文压缩
+- 做无价值检索跳过策略
+
+第三阶段：
+- 做多模型网关 / fallback / SSE
+- 做更完整的运营指标与 bad case 迭代流程
+
+这条路线比继续堆新 Agent、堆新页面更能提升项目质量。
+
+
+九、最终判断
+
+如果拿图中项目做对照组，当前项目最大的优势是：
+- 业务闭环其实比很多“纯 Agent Demo”更完整，已经覆盖面试、记忆、复盘、图谱、问答。
+- 代码里已经出现了很多值得深挖的工程点：planner、budget、graph mode、async post-process、trace。
+
+当前项目最大的短板是：
+- 主问题还不够锋利。
+- 指标体系不够完整。
+- runtime / memory / trace 还没有完全产品化和闭环化。
+
+所以结论不是“项目太浅”，而是：
+
+“这个项目已经有成为强项目的骨架，但要像图中的优秀项目那样有说服力，还需要把核心问题聚焦、把专用机制做深、把评测和稳定性证明补齐。”
+
+
+十、最值得你优先做的三件事
+
+1. 把项目主线统一成“个性化 AI 面试与成长闭环系统”，不要再分散成很多孤立模块。
+2. 建一套 retrieval + generation + latency 的评测体系，用数字证明方案价值。
+3. 把现有 pipeline 升级成可恢复、可验证、可观测的 runtime，并把 trace 做成真正能指导优化的看板。
+
+如果这三件事补上，这个项目的说服力会明显接近你图里那些优秀 Agent 项目。

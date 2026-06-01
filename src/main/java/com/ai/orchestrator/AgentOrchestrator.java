@@ -23,6 +23,12 @@ import com.ai.orchestrator.pipeline.PromptAssemblyStage;
 import com.ai.orchestrator.pipeline.RetrievalPlanningStage;
 import com.ai.orchestrator.pipeline.ScoringStage;
 import com.ai.orchestrator.pipeline.TraceContext;
+import com.ai.orchestrator.runtime.PipelineRuntime;
+import com.ai.orchestrator.runtime.PipelineStageExecutor;
+import com.ai.orchestrator.runtime.PipelineStageName;
+import com.ai.orchestrator.runtime.StageRecoveryResult;
+import com.ai.prompt.PromptActionType;
+import com.ai.prompt.PromptBudgetAllocator;
 import com.ai.prompt.PromptBuilder;
 import com.ai.prompt.PromptContext;
 import com.ai.prompt.PromptTemplates;
@@ -32,7 +38,10 @@ import com.dto.decision.AgentDecisionDTO;
 import com.dto.decision.FinalDecisionDTO;
 import com.dto.score.ScoreResultDTO;
 import com.entity.Trace.TraceEvent;
+import com.entity.UserProfile;
 import com.service.MemoryService;
+import com.service.ProfileService;
+import com.service.admin.TracePersistenceService;
 import com.service.garphrag.RetrievalBudgetService;
 
 import lombok.RequiredArgsConstructor;
@@ -51,6 +60,7 @@ public class AgentOrchestrator {
     private final PromptBuilder promptBuilder;
     private final MemoryService memoryService;
     private final HybridRetriever hybridRetriever;
+    private final ProfileService profileService;
     private final DifficultyPolicy difficultyPolicy;
     private final GraphDecisionService graphDecisionService;
     private final MemoryDecisionService memoryDecisionService;
@@ -61,23 +71,37 @@ public class AgentOrchestrator {
     private final Executor llmTaskExecutor;
     private final RetrievalPlanningStage retrievalPlanningStage;
     private final RetrievalBudgetService retrievalBudgetService;
+    private final TracePersistenceService tracePersistenceService;
+    private final PipelineStageExecutor pipelineStageExecutor;
+    private final PromptBudgetAllocator promptBudgetAllocator;
 
     /**
      * 生成面试第一题。
      */
-    public String generateFirstQuestion(Long userId, String topic) {
+    public String generateFirstQuestion(Long userId, String topic, String targetRole, String projectSummary) {
         String profileJson = memoryService.getLastProfileJson(userId);
         String summaryMd = memoryService.getLastSummaryMd(userId, "interview-extraction");
         List<String> relatedMemories = hybridRetriever.retrieve(userId, topic, 5);
+        UserProfile profile = profileService.getProfile(userId);
+        String effectiveResumeText = firstNonBlank(
+                projectSummary,
+                profile == null ? null : profile.getResumeText());
 
-        String input = promptBuilder.buildQuestionPrompt(PromptContext.builder()
+        PromptContext firstQuestionContext = PromptContext.builder()
                 .userId(userId)
                 .profileJson(profileJson)
                 .summaryMd(summaryMd)
                 .ragMemories(relatedMemories)
                 .topic(topic)
                 .task(PromptTemplates.TASK_NEW_QUESTION)
-                .build());
+                .projectSummary(projectSummary)
+                .targetRole(targetRole)
+                .resumeText(effectiveResumeText)
+                .build();
+        PromptContext compressedContext = promptBudgetAllocator.compress(
+                firstQuestionContext,
+                PromptActionType.NEW_QUESTION);
+        String input = promptBuilder.buildQuestionPrompt(compressedContext);
 
         return techInterviewerAgent.askQuestion(input);
     }
@@ -97,10 +121,14 @@ public class AgentOrchestrator {
      * 兼容旧回答接口，内部统一走新的实时流水线。
      */
     public InterviewReplyDTO handleAnswer(Long userId, String topic, String question, String answer) {
+        UserProfile profile = profileService.getProfile(userId);
         OrchestratorResult result = handleAnswerWithMultiAgentDecision(
                 userId,
                 null,
                 topic,
+                profile == null ? null : profile.getTargetRole(),
+                profile == null ? null : profile.getResumeText(),
+                profile == null ? null : profile.getResumeText(),
                 question,
                 answer,
                 memoryService.getLatestProfileJson(userId),
@@ -122,6 +150,9 @@ public class AgentOrchestrator {
             Long userId,
             Long sessionId,
             String topic,
+            String targetRole,
+            String resumeText,
+            String projectSummary,
             String question,
             String answer,
             String profileJson,
@@ -129,45 +160,139 @@ public class AgentOrchestrator {
         TraceContext trace = new TraceContext();
         trace.setTraceId(UUID.randomUUID().toString());
         OrchestratorMetrics metrics = new OrchestratorMetrics();
+        PipelineRuntime runtime = new PipelineRuntime();
+        runtime.initialize();
         InterviewPipelineContext context = InterviewPipelineContext.builder()
                 .userId(userId)
                 .sessionId(sessionId)
                 .topic(topic)
+                .targetRole(targetRole)
+                .resumeText(resumeText)
+                .projectSummary(projectSummary)
                 .question(question)
                 .answer(answer)
                 .realTime(true)
                 .retrievalBudget(retrievalBudgetService.createBudget())
+                .pipelineRuntime(runtime)
                 .traceContext(trace)
                 .build();
 
         long stageStart = System.nanoTime();
-        scoringStage.execute(context);
+        pipelineStageExecutor.execute(
+                context,
+                PipelineStageName.SCORING,
+                () -> scoringStage.execute(context),
+                (ctx, ex) -> {
+                    ctx.setScoreJson("{}");
+                    ctx.setScoreResult(new ScoreResultDTO());
+                    return StageRecoveryResult.defaultValue(ex.getMessage(), "use empty score result");
+                });
         metrics.recordStage("scoring", stageStart);
 
         context.setWeakTopic(resolveWeakTopic(context.getScoreResult(), topic));
 
         stageStart = System.nanoTime();
-        retrievalPlanningStage.execute(context);
+        pipelineStageExecutor.execute(
+                context,
+                PipelineStageName.RETRIEVAL_PLANNING,
+                () -> retrievalPlanningStage.execute(context),
+                (ctx, ex) -> {
+                    ctx.setRetrievalPlan(com.dto.Retrieval.RetrievalPlanDTO.builder()
+                            .primaryRetriever("MEMORY_RAG")
+                            .needMemory(true)
+                            .needVector(false)
+                            .needGraph(false)
+                            .needHyde(false)
+                            .enableKeywordFallback(true)
+                            .topK(2)
+                            .query(firstNonBlank(ctx.getWeakTopic(), ctx.getQuestion(), ""))
+                            .reason("runtime fallback retrieval plan")
+                            .retrievalBudget(1)
+                            .build());
+                    return StageRecoveryResult.fallback(ex.getMessage(), "fallback to conservative retrieval plan");
+                });
         metrics.recordStage("retrievalPlanning", stageStart);
 
         stageStart = System.nanoTime();
-        graphRagEnrichmentStage.execute(context);
+        pipelineStageExecutor.execute(
+                context,
+                PipelineStageName.GRAPH_RAG_ENRICHMENT,
+                () -> graphRagEnrichmentStage.execute(context),
+                (ctx, ex) -> {
+                    ctx.setRetrievalContext(List.of());
+                    ctx.setGraphRagContext(List.of());
+                    ctx.setGraphFallbackTriggered(true);
+                    return StageRecoveryResult.fallback(ex.getMessage(), "skip graph enrichment and continue");
+                });
         metrics.recordStage("graphRagEnrichment", stageStart);
 
         stageStart = System.nanoTime();
-        List<AgentDecisionDTO> decisions = buildDecisions(userId, context.getWeakTopic(), context.getScoreResult());
+        final List<AgentDecisionDTO>[] decisionHolder = new List[1];
+        pipelineStageExecutor.execute(
+                context,
+                PipelineStageName.DECISIONING,
+                () -> decisionHolder[0] = buildDecisions(userId, context.getWeakTopic(), context.getScoreResult()),
+                (ctx, ex) -> {
+                    decisionHolder[0] = buildDecisionsSerial(userId, context.getWeakTopic(), context.getScoreResult());
+                    return StageRecoveryResult.fallback(ex.getMessage(), "fallback to serial decisioning");
+                });
+        List<AgentDecisionDTO> decisions = decisionHolder[0] == null ? List.of() : decisionHolder[0];
         metrics.recordStage("decisioning", stageStart);
 
         stageStart = System.nanoTime();
-        FinalDecisionDTO finalDecision = decisionAggregator.aggregate(decisions);
+        final FinalDecisionDTO[] finalDecisionHolder = new FinalDecisionDTO[1];
+        pipelineStageExecutor.execute(
+                context,
+                PipelineStageName.AGGREGATION,
+                () -> finalDecisionHolder[0] = decisionAggregator.aggregate(decisions),
+                (ctx, ex) -> {
+                    FinalDecisionDTO fallbackDecision = new FinalDecisionDTO();
+                    fallbackDecision.setAction(com.ai.decision.DecisionAction.NEXT);
+                    fallbackDecision.setReason("aggregation fallback to NEXT");
+                    fallbackDecision.setTopic(firstNonBlank(ctx.getWeakTopic(), ctx.getTopic(), ""));
+                    finalDecisionHolder[0] = fallbackDecision;
+                    return StageRecoveryResult.defaultValue(ex.getMessage(), "use NEXT as fallback action");
+                });
+        FinalDecisionDTO finalDecision = finalDecisionHolder[0];
         metrics.recordStage("aggregation", stageStart);
 
         stageStart = System.nanoTime();
-        promptAssemblyStage.execute(context, profileJson, summaryMd, finalDecision);
+        pipelineStageExecutor.execute(
+                context,
+                PipelineStageName.PROMPT_ASSEMBLY,
+                () -> promptAssemblyStage.execute(context, profileJson, summaryMd, finalDecision),
+                (ctx, ex) -> {
+                    ctx.setPromptContext(PromptContext.builder()
+                            .userId(ctx.getUserId())
+                            .sessionId(ctx.getSessionId())
+                            .profileJson(profileJson)
+                            .summaryMd(summaryMd)
+                            .ragMemories(ctx.getRetrievalContext() == null ? List.of() : ctx.getRetrievalContext())
+                            .recentContext("暂无短期上下文。")
+                            .currentQuestion(ctx.getQuestion())
+                            .currentAnswer(ctx.getAnswer())
+                            .scoreJson(ctx.getScoreJson())
+                            .topic(finalDecision == null ? ctx.getTopic() : finalDecision.getTopic())
+                            .targetRole(ctx.getTargetRole())
+                            .resumeText(ctx.getResumeText())
+                            .projectSummary(ctx.getProjectSummary())
+                            .graphReasoning(finalDecision == null ? "" : finalDecision.getReason())
+                            .build());
+                    return StageRecoveryResult.defaultValue(ex.getMessage(), "use simplified prompt context");
+                });
         metrics.recordStage("promptAssembly", stageStart);
 
         stageStart = System.nanoTime();
-        String nextContent = generateNextContent(context, finalDecision);
+        final String[] nextContentHolder = new String[1];
+        pipelineStageExecutor.execute(
+                context,
+                PipelineStageName.GENERATION,
+                () -> nextContentHolder[0] = generateNextContent(context, finalDecision),
+                (ctx, ex) -> {
+                    nextContentHolder[0] = "我先基于当前上下文继续这轮面试。请你简要补充刚才这道题的核心思路。";
+                    return StageRecoveryResult.defaultValue(ex.getMessage(), "use safe fallback generation");
+                });
+        String nextContent = nextContentHolder[0];
         metrics.recordStage("generation", stageStart);
 
         OrchestratorResult result = new OrchestratorResult();
@@ -178,7 +303,10 @@ public class AgentOrchestrator {
         result.setAgentDecisions(decisions);
         result.setStageLatencyMs(metrics.snapshotStageLatencyMs());
         result.setTotalLatencyMs(metrics.totalLatencyMs());
-
+        tracePersistenceService.persist(
+                context.getTraceContext(),
+                userId,
+                sessionId);
         log.info("orchestrator latency total={}ms stages={}", result.getTotalLatencyMs(), result.getStageLatencyMs());
         return result;
     }
@@ -287,7 +415,8 @@ public class AgentOrchestrator {
                     .metadata(Map.of(
                             "action", finalDecision.getAction().name(),
                             "agent", agentName,
-                            "topic", promptContext == null || promptContext.getTopic() == null ? "" : promptContext.getTopic(),
+                            "topic",
+                            promptContext == null || promptContext.getTopic() == null ? "" : promptContext.getTopic(),
                             "graphMode", context.getUsedGraphMode() == null ? "" : context.getUsedGraphMode().name(),
                             "fallbackTriggered", context.isGraphFallbackTriggered(),
                             "promptLength", stageInput == null ? 0 : stageInput.length(),
@@ -302,6 +431,18 @@ public class AgentOrchestrator {
 
     private boolean isBlank(String value) {
         return value == null || value.isBlank();
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (!isBlank(value)) {
+                return value;
+            }
+        }
+        return null;
     }
 
     private long elapsedMillis(long startNanos) {

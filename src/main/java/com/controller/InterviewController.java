@@ -29,13 +29,15 @@ public class InterviewController {
                         @RequestParam Long userId,
                         @RequestParam String interviewType,
                         @RequestParam String targetRole,
-                        @RequestParam String topic) {
+                        @RequestParam String topic,
+                        @RequestParam(required = false) String projectSummary) {
                 return Result.success(
                                 interviewService.startInterview(
                                                 userId,
                                                 interviewType,
                                                 targetRole,
-                                                topic));
+                                                topic,
+                                                projectSummary));
 
         }
 

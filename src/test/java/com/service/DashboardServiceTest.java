@@ -1,6 +1,7 @@
 package com.service;
 
 import com.dto.dashboard.DashboardDTO;
+import com.dto.dashboard.LearningRecommendationDTO;
 import com.entity.InterviewSession;
 import com.entity.UserProfile;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -8,6 +9,9 @@ import com.mapper.FlashcardMapper;
 import com.mapper.InterviewSessionMapper;
 import com.mapper.MemoryProfileJsonMapper;
 import com.mapper.UserProfileMapper;
+import com.service.Dashboard.LearningRecommendationService;
+import com.service.Dashboard.DashboardService;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -33,6 +37,9 @@ class DashboardServiceTest {
 
   @Mock
   private FlashcardMapper flashcardMapper;
+
+  @Mock
+  private LearningRecommendationService learningRecommendationService;
 
   @Test
   void getDashboardUsesMergedUserProfileForSkillsAndWeaknesses() {
@@ -63,12 +70,19 @@ class DashboardServiceTest {
     when(userProfileMapper.selectOne(any())).thenReturn(profile);
     when(interviewSessionMapper.selectList(any())).thenReturn(List.of(session));
     when(flashcardMapper.selectCount(any())).thenReturn(0L);
+    when(learningRecommendationService.generate(1L)).thenReturn(LearningRecommendationDTO.builder()
+        .weakTopics(List.of("Redis缓存一致性", "JVM GC"))
+        .roleGapSuggestions(List.of("建议优先补强 Redis缓存一致性 的设计取舍表达。"))
+        .flashcards(List.of())
+        .reviewOrder(List.of("Redis缓存一致性", "JVM GC"))
+        .build());
 
     DashboardService service = new DashboardService(
         memoryProfileJsonMapper,
         userProfileMapper,
         interviewSessionMapper,
         flashcardMapper,
+        learningRecommendationService,
         new ObjectMapper());
 
     DashboardDTO dashboard = service.getDashboard(1L);

@@ -1,9 +1,10 @@
-package com.service;
+package com.service.Dashboard;
 
 import org.springframework.stereotype.Service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.dto.dashboard.DashboardDTO;
+import com.dto.dashboard.LearningRecommendationDTO;
 import com.dto.dashboard.RecentInterviewDTO;
 import com.dto.dashboard.SkillRadarDTO;
 import com.dto.dashboard.WeaknessRankDTO;
@@ -49,7 +50,7 @@ public class DashboardService {
   private final UserProfileMapper userProfileMapper;
   private final InterviewSessionMapper interviewSessionMapper;
   private final FlashcardMapper flashcardMapper;
-
+  private final LearningRecommendationService learningRecommendationService;
   private final ObjectMapper objectMapper;
 
   /**
@@ -193,29 +194,40 @@ public class DashboardService {
    * AI建议
    */
   private List<String> buildSuggestions(Long userId) {
+    LearningRecommendationDTO recommendation = learningRecommendationService.generate(userId);
     List<String> suggestions = new ArrayList<>();
-    List<WeaknessRankDTO> weaknesses = buildWeaknesses(userId);
 
-    if (!weaknesses.isEmpty()) {
-      WeaknessRankDTO top1 = weaknesses.get(0);
-      suggestions.add("优先针对“" + top1.getName() + "”安排专项复习，近期出现 " + top1.getCount() + " 次。");
-      if (weaknesses.size() > 1) {
-        WeaknessRankDTO top2 = weaknesses.get(1);
-        suggestions.add("把“" + top2.getName() + "”和高频面试题结合复盘，尽快补齐第二短板。");
-      }
+    if (recommendation == null) {
+      suggestions.add("继续完成至少一场模拟面试，系统会基于真实答题表现生成成长建议。");
+      return suggestions;
     }
 
-    List<InterviewSession> sessions = getRecentFinishedSessions(userId, 3);
-    if (!sessions.isEmpty()) {
-      String latestRole = firstNonBlank(sessions.get(0).getTargetRole(), "当前目标岗位");
-      suggestions.add("结合最近的 " + latestRole + " 面试记录，重点整理高频追问与标准表达。");
+    if (recommendation.getRoleGapSuggestions() != null) {
+      suggestions.addAll(recommendation.getRoleGapSuggestions().stream()
+          .filter(s -> !isBlank(s))
+          .map(String::trim)
+          .toList());
+    }
+
+    if (recommendation.getWeakTopics() != null && !recommendation.getWeakTopics().isEmpty()) {
+      String weakTopicSummary = String.join("、", recommendation.getWeakTopics());
+      suggestions.add("本周优先复习 " + weakTopicSummary + "，按照建议顺序逐个补齐核心知识点。");
+    }
+
+    if (recommendation.getFlashcards() != null && !recommendation.getFlashcards().isEmpty()) {
+      suggestions.add("结合系统生成的知识闪卡进行复盘，优先完成高频薄弱点对应的题目记忆与表达训练。");
     }
 
     if (suggestions.isEmpty()) {
       suggestions.add("继续完成至少一场模拟面试，系统会基于真实答题表现生成成长建议。");
     }
 
-    return suggestions.stream().distinct().limit(3).toList();
+    return suggestions.stream()
+        .filter(s -> !isBlank(s))
+        .map(String::trim)
+        .distinct()
+        .limit(3)
+        .toList();
   }
 
   /**

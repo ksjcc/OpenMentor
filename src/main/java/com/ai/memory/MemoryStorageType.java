@@ -1,0 +1,11 @@
+package com.ai.memory;
+
+public enum MemoryStorageType {
+  REDIS_SESSION_CACHE,
+  MEMORY_SUMMARY_MD,
+  MEMORY_CHUNK,
+  PGVECTOR,
+  INTERVIEW_HISTORY,
+  MEMORY_PROFILE_JSON,
+  USER_PROFILE
+}

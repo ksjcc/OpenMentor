@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -13,6 +14,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -31,10 +33,14 @@ import com.ai.orchestrator.pipeline.PromptAssemblyStage;
 import com.ai.orchestrator.pipeline.RetrievalPlanningStage;
 import com.ai.orchestrator.pipeline.ScoringStage;
 import com.ai.prompt.PromptBuilder;
+import com.ai.prompt.PromptBudgetAllocator;
+import com.ai.orchestrator.runtime.PipelineStageExecutor;
 import com.dto.decision.AgentDecisionDTO;
 import com.dto.score.ScoreResultDTO;
 import com.ai.rag.HybridRetriever;
 import com.service.MemoryService;
+import com.service.ProfileService;
+import com.service.admin.TracePersistenceService;
 import com.service.garphrag.RetrievalBudgetService;
 
 @ExtendWith(MockitoExtension.class)
@@ -61,6 +67,9 @@ class AgentOrchestratorBenchmarkTest {
     private HybridRetriever hybridRetriever;
 
     @Mock
+    private ProfileService profileService;
+
+    @Mock
     private DifficultyPolicy difficultyPolicy;
 
     @Mock
@@ -84,7 +93,26 @@ class AgentOrchestratorBenchmarkTest {
     @Mock
     private RetrievalBudgetService retrievalBudgetService;
 
+    @Mock
+    private TracePersistenceService tracePersistenceService;
+
+    @Mock
+    private PipelineStageExecutor pipelineStageExecutor;
+
+    @Mock
+    private PromptBudgetAllocator promptBudgetAllocator;
+
     private final DecisionAggregator decisionAggregator = new DecisionAggregator();
+
+    @BeforeEach
+    void setUp() {
+        lenient().when(promptBudgetAllocator.compress(any(), any())).thenAnswer(invocation -> invocation.getArgument(0));
+        lenient().doAnswer(invocation -> {
+            Runnable action = invocation.getArgument(2);
+            action.run();
+            return null;
+        }).when(pipelineStageExecutor).execute(any(), any(), any(), any());
+    }
 
     @AfterAll
     static void shutdownExecutor() {
@@ -119,6 +147,7 @@ class AgentOrchestratorBenchmarkTest {
                 promptBuilder,
                 memoryService,
                 hybridRetriever,
+                profileService,
                 difficultyPolicy,
                 graphDecisionService,
                 memoryDecisionService,
@@ -128,7 +157,10 @@ class AgentOrchestratorBenchmarkTest {
                 promptAssemblyStage,
                 TEST_EXECUTOR,
                 retrievalPlanningStage,
-                retrievalBudgetService);
+                retrievalBudgetService,
+                tracePersistenceService,
+                pipelineStageExecutor,
+                promptBudgetAllocator);
 
         ScoreResultDTO scoreResult = new ScoreResultDTO();
         scoreResult.setScore(58);
@@ -193,6 +225,7 @@ class AgentOrchestratorBenchmarkTest {
                 promptBuilder,
                 memoryService,
                 hybridRetriever,
+                profileService,
                 difficultyPolicy,
                 graphDecisionService,
                 memoryDecisionService,
@@ -202,12 +235,18 @@ class AgentOrchestratorBenchmarkTest {
                 promptAssemblyStage,
                 TEST_EXECUTOR,
                 retrievalPlanningStage,
-                retrievalBudgetService);
+                retrievalBudgetService,
+                tracePersistenceService,
+                pipelineStageExecutor,
+                promptBudgetAllocator);
 
         OrchestratorResult result = orchestrator.handleAnswerWithMultiAgentDecision(
                 1L,
                 99L,
                 "JVM",
+                "Java后端开发",
+                "做过订单系统、缓存和消息队列相关项目。",
+                "负责订单系统的缓存与异步链路优化。",
                 "什么是 JVM 内存模型？",
                 "它主要分堆和栈。",
                 "{}",

@@ -35,4 +35,5 @@ public class DashboardDTO {
    * AI成长建议
    */
   private List<String> aiSuggestions;
+  private LearningRecommendationDTO learningRecommendation;
 }

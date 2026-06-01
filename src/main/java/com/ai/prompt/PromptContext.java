@@ -110,4 +110,7 @@ public class PromptContext {
    * GraphRAG / 其他扩展任务的原始输入
    */
   private String rawInput;
+
+  private String projectSummary;
+  private List<String> recommends;
 }

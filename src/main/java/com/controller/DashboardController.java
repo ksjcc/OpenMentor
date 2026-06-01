@@ -2,7 +2,8 @@ package com.controller;
 
 import com.common.Result;
 import com.dto.dashboard.DashboardDTO;
-import com.service.DashboardService;
+import com.service.Dashboard.DashboardService;
+
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;

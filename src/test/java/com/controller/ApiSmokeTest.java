@@ -7,13 +7,14 @@ import com.dto.graph.GraphLinkDTO;
 import com.dto.graph.GraphNodeDTO;
 import com.entity.Flashcard;
 import com.entity.MemoryChunk;
-import com.service.DashboardService;
-import com.service.FlashcardService;
 import com.service.InterviewService;
 import com.service.KnowledgeQaService;
 import com.service.KnowledgeGraphService;
 import com.service.MemoryService;
 import com.service.ReviewService;
+import com.service.Dashboard.DashboardService;
+import com.service.Dashboard.FlashcardService;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -77,14 +78,14 @@ class ApiSmokeTest {
     reply.setSessionId(10L);
     reply.setAction("QUESTION");
     reply.setContent("Redis 如何保证缓存一致性？");
-    when(interviewService.startInterview(1L, "TECH", "Java后端开发", "Redis"))
+    when(interviewService.startInterview(1L, "TECH", "Java后端开发", "Redis", null))
         .thenReturn(reply);
 
     mockMvc.perform(post("/api/interview/start")
-            .param("userId", "1")
-            .param("interviewType", "TECH")
-            .param("targetRole", "Java后端开发")
-            .param("topic", "Redis"))
+        .param("userId", "1")
+        .param("interviewType", "TECH")
+        .param("targetRole", "Java后端开发")
+        .param("topic", "Redis"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.code").value(0))
         .andExpect(jsonPath("$.data.sessionId").value(10))
@@ -101,9 +102,9 @@ class ApiSmokeTest {
         .thenReturn(reply);
 
     mockMvc.perform(post("/api/interview/{sessionId}/answer", 10L)
-            .param("userId", "1")
-            .param("topic", "Redis")
-            .content("cache answer"))
+        .param("userId", "1")
+        .param("topic", "Redis")
+        .content("cache answer"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.code").value(0))
         .andExpect(jsonPath("$.data.sessionId").value(10))
@@ -116,7 +117,7 @@ class ApiSmokeTest {
         .thenReturn("{\"summary\":\"done\"}");
 
     mockMvc.perform(post("/api/interview/{sessionId}/finish", 10L)
-            .param("userId", "1"))
+        .param("userId", "1"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.code").value(0))
         .andExpect(jsonPath("$.data").value("{\"summary\":\"done\"}"));
@@ -132,7 +133,7 @@ class ApiSmokeTest {
     when(flashcardService.getTodayReview(1L)).thenReturn(List.of(card));
 
     mockMvc.perform(get("/api/review/today")
-            .param("userId", "1"))
+        .param("userId", "1"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.code").value(0))
         .andExpect(jsonPath("$.data[0].id").value(100))
@@ -142,8 +143,8 @@ class ApiSmokeTest {
   @Test
   void submitReviewRunsThrough() throws Exception {
     mockMvc.perform(post("/api/review/submit")
-            .param("cardId", "100")
-            .param("correct", "true"))
+        .param("cardId", "100")
+        .param("correct", "true"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.code").value(0))
         .andExpect(jsonPath("$.data.message").value("提交成功"));
@@ -159,7 +160,7 @@ class ApiSmokeTest {
     when(dashboardService.getDashboard(1L)).thenReturn(dashboard);
 
     mockMvc.perform(get("/api/dashboard")
-            .param("userId", "1"))
+        .param("userId", "1"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.code").value(0))
         .andExpect(jsonPath("$.data.todayReviewCount").value(3))
@@ -187,7 +188,7 @@ class ApiSmokeTest {
     when(knowledgeGraphService.getGraph(1L)).thenReturn(graph);
 
     mockMvc.perform(get("/api/graph")
-            .param("userId", "1"))
+        .param("userId", "1"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.code").value(0))
         .andExpect(jsonPath("$.data.nodes[0].name").value("Redis"))
@@ -200,9 +201,9 @@ class ApiSmokeTest {
         .thenReturn("Redis 快主要因为内存访问、单线程事件循环和高效数据结构。");
 
     mockMvc.perform(post("/api/knowledge/ask")
-            .param("userId", "1")
-            .contentType(TEXT_PLAIN)
-            .content("Redis 为什么快？"))
+        .param("userId", "1")
+        .contentType(TEXT_PLAIN)
+        .content("Redis 为什么快？"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.code").value(0))
         .andExpect(jsonPath("$.data").value("Redis 快主要因为内存访问、单线程事件循环和高效数据结构。"));
@@ -219,8 +220,8 @@ class ApiSmokeTest {
     when(memoryService.searchRelevantChunks(1L, "Redis", 5)).thenReturn(List.of(chunk));
 
     mockMvc.perform(get("/api/memory/search")
-            .param("userId", "1")
-            .param("keyword", "Redis"))
+        .param("userId", "1")
+        .param("keyword", "Redis"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.code").value(0))
         .andExpect(jsonPath("$.data[0].id").value(200))

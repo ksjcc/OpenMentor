@@ -1,8 +1,12 @@
 package com.ai.orchestrator.pipeline;
 
 import java.util.Map;
+import static java.util.Map.entry;
 
+import com.ai.prompt.PromptActionType;
+import com.ai.prompt.PromptBudgetAllocator;
 import com.ai.prompt.PromptContext;
+import com.ai.prompt.PromptTemplates;
 import com.dto.decision.FinalDecisionDTO;
 import com.entity.Trace.TraceEvent;
 import com.service.cache.InterviewMemoryCacheService;
@@ -14,6 +18,7 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class PromptAssemblyStage {
   private final InterviewMemoryCacheService interviewMemoryCacheService;
+  private final PromptBudgetAllocator promptBudgetAllocator;
 
   public void execute(InterviewPipelineContext context,
       String profileJson,
@@ -29,22 +34,30 @@ public class PromptAssemblyStage {
         .sessionId(context.getSessionId())
         .profileJson(profileJson)
         .summaryMd(summaryMd)
-        .ragMemories(context.getGraphRagContext())
+        .ragMemories(context.getRetrievalContext())
         .recentContext(recentContext)
         .currentQuestion(context.getQuestion())
         .currentAnswer(context.getAnswer())
         .scoreJson(context.getScoreJson())
         .topic(finalDecision.getTopic() == null ? context.getTopic() : finalDecision.getTopic())
+        .targetRole(context.getTargetRole())
+        .resumeText(context.getResumeText())
+        .projectSummary(context.getProjectSummary())
+        .task(resolveTask(finalDecision))
         .graphReasoning(finalDecision.getReason())
         .build();
+    PromptContext compressed = promptBudgetAllocator.compress(
+        promptContext,
+        PromptActionType.fromTask(promptContext.getTask()));
 
-    context.setPromptContext(promptContext);
+    context.setPromptContext(compressed);
 
     if (context.getTraceContext() == null) {
       return;
     }
 
     long end = System.currentTimeMillis();
+
     TraceEvent event = TraceEvent.builder()
         .stage("prompt_assembly")
         .startTime(start)
@@ -52,20 +65,36 @@ public class PromptAssemblyStage {
         .latencyMs(end - start)
         .input(context.getQuestion() + "\n" + context.getAnswer())
         .output(finalDecision.getAction().name())
-        .metadata(Map.of(
-            "action", finalDecision.getAction().name(),
-            "topic", promptContext.getTopic() == null ? "" : promptContext.getTopic(),
-            "recentContextLength", recentContext == null ? 0 : recentContext.length(),
-            "ragContextCount", promptContext.getRagMemories() == null ? 0 : promptContext.getRagMemories().size(),
-            "hasProfile", profileJson != null && !profileJson.isBlank(),
-            "hasSummary", summaryMd != null && !summaryMd.isBlank(),
-            "graphMode", context.getUsedGraphMode() == null ? "" : context.getUsedGraphMode().name(),
-            "fallbackTriggered", context.isGraphFallbackTriggered(),
-            "decisionReason", finalDecision.getReason() == null ? "" : finalDecision.getReason()))
+        .metadata(Map.ofEntries(
+            entry("action", finalDecision.getAction().name()),
+            entry("topic", promptContext.getTopic() == null ? "" : promptContext.getTopic()),
+            entry("recentContextLength", recentContext == null ? 0 : recentContext.length()),
+            entry("ragContextCount", promptContext.getRagMemories() == null ? 0 : promptContext.getRagMemories().size()),
+            entry("compressedRagContextCount",
+                compressed.getRagMemories() == null ? 0 : compressed.getRagMemories().size()),
+            entry("graphContextCount", context.getGraphRagContext() == null ? 0 : context.getGraphRagContext().size()),
+            entry("hasProfile", profileJson != null && !profileJson.isBlank()),
+            entry("hasSummary", summaryMd != null && !summaryMd.isBlank()),
+            entry("promptTask", promptContext.getTask() == null ? "" : promptContext.getTask()),
+            entry("graphMode", context.getUsedGraphMode() == null ? "" : context.getUsedGraphMode().name()),
+            entry("fallbackTriggered", context.isGraphFallbackTriggered()),
+            entry("decisionReason", finalDecision.getReason() == null ? "" : finalDecision.getReason())))
         .build();
 
     context.getTraceContext()
         .addEvent(event);
   }
 
+  private String resolveTask(FinalDecisionDTO finalDecision) {
+    if (finalDecision == null || finalDecision.getAction() == null) {
+      return PromptTemplates.TASK_NEW_QUESTION;
+    }
+
+    return switch (finalDecision.getAction()) {
+      case FOLLOW_UP -> PromptTemplates.TASK_FOLLOW_UP;
+      case HARDER -> PromptTemplates.TASK_HARDER;
+      case NEXT -> PromptTemplates.TASK_NEW_QUESTION;
+      case FINISH -> PromptTemplates.TASK_DECISION;
+    };
+  }
 }

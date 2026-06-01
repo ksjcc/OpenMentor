@@ -23,6 +23,15 @@ public class TraceEvent {
   private String input;
 
   private String output;
+  private String Type;
 
   private Map<String, Object> metadata;
+
+  public String getType() {
+    return Type;
+  }
+
+  public void setType(String type) {
+    this.Type = type;
+  }
 }

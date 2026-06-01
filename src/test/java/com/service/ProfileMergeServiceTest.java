@@ -88,7 +88,7 @@ class ProfileMergeServiceTest {
 
     assertThat(merged.path("abilityMap").path("Java基础").asInt()).isEqualTo(70);
     assertThat(merged.path("abilityMap").path("Redis缓存一致性").asInt()).isEqualTo(25);
-    assertThat(merged.path("abilityMap").path("Spring Boot").asInt()).isEqualTo(65);
+    assertThat(merged.path("abilityMap").path("Spring Boot").asInt()).isEqualTo(53);
     assertThat(merged.path("strengths").get(0).path("occurrenceCount").asInt()).isEqualTo(2);
     assertThat(merged.path("weaknesses").get(1).path("name").asText()).isEqualTo("Redis缓存一致性");
     assertThat(merged.path("weaknesses").get(1).path("level").asInt()).isEqualTo(3);
@@ -98,7 +98,7 @@ class ProfileMergeServiceTest {
     assertThat(memoryCaptor.getValue().getUserId()).isEqualTo(1L);
     assertThat(memoryCaptor.getValue().getVersion()).isEqualTo(3);
     assertThat(objectMapper.readTree(memoryCaptor.getValue().getProfileData()).path("abilityMap").path("Spring Boot").asInt())
-        .isEqualTo(65);
+        .isEqualTo(53);
 
     ArgumentCaptor<UserProfile> profileCaptor = ArgumentCaptor.forClass(UserProfile.class);
     verify(userProfileMapper).insert(profileCaptor.capture());

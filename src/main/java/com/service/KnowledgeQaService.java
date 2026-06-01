@@ -8,11 +8,7 @@ import org.springframework.stereotype.Service;
 import com.ai.client.LlmClient;
 import com.ai.decision.RetrievalPlanningService;
 import com.ai.rag.HybridRetriever;
-import com.common.GraphRagMode;
-import com.dto.graphrag.RetrievalPlanDTO;
-import com.service.garphrag.GraphRagRetriever;
-import com.service.garphrag.RetrievalBudget;
-import com.service.garphrag.RetrievalBudgetService;
+import com.dto.Retrieval.RetrievalPlanDTO;
 
 import lombok.RequiredArgsConstructor;
 
@@ -23,23 +19,13 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class KnowledgeQaService {
   private final RetrievalPlanningService retrievalPlanningService;
-  private final RetrievalBudgetService retrievalBudgetService;
   private final HybridRetriever hybridRetriever;
-  private final GraphRagRetriever graphRagRetriever;
   private final LlmClient llmClient;
 
   public String answer(Long userId, String question) {
     RetrievalPlanDTO plan = retrievalPlanningService.plan(question, "", question);
-    RetrievalBudget budget = retrievalBudgetService.createBudget();
 
-    List<String> contexts = new ArrayList<>();
-    if (plan.isNeedMemory()) {
-      contexts.addAll(hybridRetriever.retrieve(userId, plan.getQuery(), safeTopK(plan.getTopK())));
-    }
-    if (plan.isNeedGraph()) {
-      GraphRagMode mode = plan.getGraphMode() == null ? GraphRagMode.AUTO : plan.getGraphMode();
-      contexts.addAll(graphRagRetriever.retrieve(userId, plan.getQuery(), mode, false, safeTopK(plan.getTopK()), budget));
-    }
+    List<String> contexts = new ArrayList<>(hybridRetriever.retrieve(userId, plan));
 
     List<String> mergedContexts = contexts.stream()
         .filter(text -> text != null && !text.isBlank())
@@ -51,10 +37,6 @@ public class KnowledgeQaService {
     return llmClient.safeChat(
         prompt,
         () -> "我暂时没能组织出稳定答案，请稍后重试。");
-  }
-
-  private int safeTopK(Integer topK) {
-    return topK == null || topK <= 0 ? 5 : topK;
   }
 
   private String buildAnswerPrompt(

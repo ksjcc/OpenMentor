@@ -39,6 +39,18 @@ public class PromptBuilder {
         %s
 
         ====================================
+        【目标岗位】
+        ====================================
+
+        %s
+
+        ====================================
+        【简历 / 项目经历摘要】
+        ====================================
+
+        %s
+
+        ====================================
         【任务】
         ====================================
 
@@ -49,12 +61,52 @@ public class PromptBuilder {
         2. 不要过于八股
         3. 优先围绕用户薄弱点
         4. 可以结合项目场景
-        5. 只输出问题
-        6. 不要解释
-        7. 不要输出答案
+        5. 尽量贴合目标岗位的真实考察重点
+        6. 如果简历中有项目经历，优先从项目追问切入
+        7. 只输出问题
+        8. 不要解释
+        9. 不要输出答案
         """.formatted(
         buildMemoryBlock(promptContext),
-        safe(promptContext.getTopic()));
+        safe(promptContext.getTopic()),
+        safe(promptContext.getTargetRole()),
+        candidateBackground(promptContext));
+  }
+
+  public List<String> buildRecommendsPrompt(PromptContext context) {
+    PromptContext promptContext = emptyIfNull(context);
+    return List.of(
+        "【角色】",
+        "你是一个专业的程序员求职成长顾问。",
+        "",
+        "你的职责：",
+        "1. 结合目标岗位给出学习建议",
+        "2. 优先围绕用户当前最薄弱的能力点",
+        "3. 建议要具体、可执行、适合近期复习",
+        "4. 每条建议尽量简洁，不空泛",
+        "",
+        "====================================",
+        "【目标岗位】",
+        "====================================",
+        safe(promptContext.getTargetRole()),
+        "",
+        "====================================",
+        "【当前薄弱点】",
+        "====================================",
+        joinInlineList(promptContext.getRecommends()),
+        "",
+        "====================================",
+        "【任务】",
+        "====================================",
+        "请针对这些薄弱点，输出 3 条岗位补短板建议。",
+        "",
+        "要求：",
+        "1. 每条建议单独一行",
+        "2. 建议必须和目标岗位匹配",
+        "3. 优先给出具体复习方向、实践方式或项目训练建议",
+        "4. 不要输出序号",
+        "5. 不要解释",
+        "6. 不要输出多余开场白");
   }
 
   public String buildHarderQuestionPrompt(PromptContext context) {
@@ -78,21 +130,30 @@ public class PromptBuilder {
             【当前主题】
             %s
 
+            【目标岗位】
+            %s
+
+            【简历 / 项目经历摘要】
+            %s
+
             【任务】
             用户刚才回答质量较高，请提出一个更高难度的问题。
 
             要求：
             1. 问题必须更深入
             2. 可以涉及原理、源码、系统设计或项目落地
-            3. 只输出一个问题
-            4. 不要给答案
+            3. 尽量贴合目标岗位对该主题的更高要求
+            4. 可以结合用户项目经历继续深挖
+            5. 只输出一个问题
+            6. 不要给答案
         """.formatted(
-        buildMemoryBlock(promptContext),
         safe(promptContext.getProfileJson()),
         safe(promptContext.getSummaryMd()),
         joinList(promptContext.getRagMemories()),
         safe(promptContext.getRecentContext()),
-        safe(promptContext.getTopic()));
+        safe(promptContext.getTopic()),
+        safe(promptContext.getTargetRole()),
+        candidateBackground(promptContext));
   }
 
   public String buildFollowUpPrompt(PromptContext context) {
@@ -128,6 +189,18 @@ public class PromptBuilder {
         %s
 
         ====================================
+        【目标岗位】
+        ====================================
+
+        %s
+
+        ====================================
+        【简历 / 项目经历摘要】
+        ====================================
+
+        %s
+
+        ====================================
         【任务】
         ====================================
 
@@ -145,11 +218,14 @@ public class PromptBuilder {
         3. 不要输出答案
         4. 不要重复原问题
         5. 优先围绕薄弱点追问
+        6. 可以结合目标岗位和项目背景继续深挖
         """.formatted(
         buildMemoryBlock(promptContext),
         safe(promptContext.getCurrentQuestion()),
         safe(promptContext.getCurrentAnswer()),
         safe(promptContext.getScoreJson()),
+        safe(promptContext.getTargetRole()),
+        candidateBackground(promptContext),
         safe(context.getGraphReasoning()));
   }
 
@@ -601,10 +677,30 @@ public class PromptBuilder {
     return result.toString();
   }
 
+  private String joinInlineList(List<String> list) {
+    if (list == null || list.isEmpty()) {
+      return "暂无";
+    }
+
+    return list.stream()
+        .filter(item -> item != null && !item.isBlank())
+        .map(String::trim)
+        .reduce((left, right) -> left + "、" + right)
+        .orElse("暂无");
+  }
+
   private String safe(String value) {
     return value == null || value.isBlank()
         ? "暂无"
         : value;
+  }
+
+  private String candidateBackground(PromptContext context) {
+    PromptContext promptContext = emptyIfNull(context);
+    if (promptContext.getProjectSummary() != null && !promptContext.getProjectSummary().isBlank()) {
+      return promptContext.getProjectSummary();
+    }
+    return safe(promptContext.getResumeText());
   }
 
   private PromptContext emptyIfNull(PromptContext context) {
