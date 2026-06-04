@@ -1,0 +1,11 @@
+{
+  "benchmark_name": "sse_streaming_benchmark",
+  "ttft_target_ms": 800,
+  "interrupt_latency_target_ms": 200,
+  "p50_ttft_target_ms": 600,
+  "p95_ttft_target_ms": 900,
+  "p95_interrupt_latency_target_ms": 250,
+  "max_post_interrupt_chunks": 1,
+  "required_success_rate": 0.95,
+  "notes": "面向本地开发机和局域网环境"
+}

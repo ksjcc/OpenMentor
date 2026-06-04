@@ -1,0 +1,735 @@
+Runtime-Trace 性能测试数据集模板
+适用项目：AgentCareer
+整理日期：2026-06-02
+
+一、文档目的
+
+本模板用于为 AgentCareer 项目的以下两项指标准备测试数据与测试方案：
+
+1. 问题排查效率提升 [XX%]
+2. 异常定位效率提升 [XX%]
+
+这两项指标与检索命中率不同，不是依赖普通的 corpus / query 数据集，而是依赖：
+- 故障注入样本集
+- Trace 事件记录
+- 排查任务清单
+- 人工或半自动计时规则
+
+因此，如果要严谨测出 “提升 XX%”，建议准备一套新的 Runtime-Trace 测试数据集。
+
+
+二、是否需要新的测试数据集
+
+结论：
+- 需要
+
+原因：
+- “问题排查效率” 和 “异常定位效率” 测的是故障发生后，是否更快发现问题、是否更快定位到正确阶段、是否更快识别 fallback / error root cause。
+- 这类指标无法只靠普通业务样本或检索样本计算。
+- 必须构造一批带标准答案的异常场景样本。
+
+换句话说，这里的“数据集”不是知识库，而是：
+- 一组故障 case
+- 每个 case 的预期故障点
+- 每个 case 的正确定位结果
+- 每个 case 的排查任务
+
+
+三、这套 Runtime-Trace 测试集由哪些文件组成
+
+建议至少准备以下四类文件：
+
+1. runtime_trace_cases.jsonl
+- 故障注入样本集
+
+2. runtime_trace_expected_labels.jsonl
+- 每个故障样本的标准答案
+
+3. runtime_trace_troubleshooting_tasks.jsonl
+- 排查任务定义集
+
+4. runtime_trace_run_log.csv
+- 实际测试执行记录表
+
+
+四、文件一：runtime_trace_cases.jsonl
+
+作用：
+- 定义“要测哪些异常场景”
+- 作为问题排查和异常定位测试的原始样本池
+
+每一行表示一个故障 case。
+
+字段模板如下：
+
+{
+  "case_id": "trace_case_001",
+  "case_name": "评分阶段返回非法JSON",
+  "category": "LLM_OUTPUT",
+  "severity": "HIGH",
+  "scenario": "INTERVIEW_RUNTIME",
+  "entry_api": "answerQuestion",
+  "pipeline_stage": "SCORING",
+  "fault_injection_type": "INVALID_JSON",
+  "fault_injection_point": "ScoreAgent",
+  "user_id": 1001,
+  "session_id": 2001,
+  "question": "为什么 Redis 缓存一致性难做？",
+  "answer": "数据库和缓存可能不同步，但我讲不清具体方案。",
+  "weak_topic": "Redis缓存一致性",
+  "expected_user_impact": "主流程应继续，评分结果走fallback",
+  "expected_runtime_behavior": "触发默认评分结果并记录fallback trace",
+  "notes": "用于验证评分异常时的主链路韧性与trace可定位性"
+}
+
+字段说明：
+
+1. case_id
+- 故障样本唯一 ID
+
+2. case_name
+- 样本名称，便于人工理解
+
+3. category
+- 故障大类
+- 推荐值：
+  LLM_OUTPUT
+  LLM_TIMEOUT
+  RETRIEVAL_TIMEOUT
+  REDIS_MISS
+  PGVECTOR_ERROR
+  GRAPH_ERROR
+  MQ_ERROR
+  TRACE_PERSIST_ERROR
+  PROMPT_ASSEMBLY_ERROR
+  GENERATION_ERROR
+
+4. severity
+- 推荐值：
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+
+5. scenario
+- 推荐值：
+  INTERVIEW_RUNTIME
+  POST_PROCESS
+  DASHBOARD
+  KNOWLEDGE_QA
+
+6. entry_api
+- 触发入口
+- 推荐值：
+  startInterview
+  answerQuestion
+  finishInterview
+  knowledgeQa
+  dashboard
+
+7. pipeline_stage
+- 期望归属的主阶段
+- 推荐值：
+  SCORING
+  RETRIEVAL_PLANNING
+  GRAPH_RAG_ENRICHMENT
+  DECISIONING
+  AGGREGATION
+  PROMPT_ASSEMBLY
+  GENERATION
+  POST_PROCESS
+  TRACE_PERSISTENCE
+
+8. fault_injection_type
+- 具体故障类型
+- 推荐值：
+  INVALID_JSON
+  EMPTY_OUTPUT
+  TIMEOUT
+  EXCEPTION
+  CONNECTION_FAIL
+  FALLBACK_TRIGGER
+  DATA_MISSING
+
+9. fault_injection_point
+- 故障注入点
+- 推荐值举例：
+  ScoreAgent
+  RetrievalPlanningService
+  GraphRagRetriever
+  RedisTemplate
+  VectorStoreService
+  TracePersistenceService
+  PromptAssemblyStage
+  TechInterviewerAgent
+
+10. user_id / session_id / question / answer / weak_topic
+- 用于构造真实运行上下文
+
+11. expected_user_impact
+- 从用户视角看，主流程应该如何表现
+- 例如：
+  主流程继续
+  返回安全兜底话术
+  跳过某阶段但不中断主流程
+  面后任务异步失败但不影响面试结束
+
+12. expected_runtime_behavior
+- 从系统视角看，期望触发什么 fallback / recovery
+
+13. notes
+- 样本备注
+
+
+五、文件二：runtime_trace_expected_labels.jsonl
+
+作用：
+- 定义每个 case 的“标准答案”
+- 后续用于衡量定位是否准确
+
+字段模板如下：
+
+{
+  "case_id": "trace_case_001",
+  "expected_root_stage": "SCORING",
+  "expected_root_component": "ScoreAgent",
+  "expected_error_type": "INVALID_JSON",
+  "expected_fallback_triggered": true,
+  "expected_fallback_action": "use empty score result",
+  "expected_trace_keywords": ["invalid_llm_output", "SCORING", "fallback"],
+  "expected_user_visible_result": "面试继续进行",
+  "expected_trace_required_fields": ["stage", "latencyMs", "metadata", "fallbackTriggered"],
+  "judge_rule": "若能定位到SCORING阶段且能说明JSON解析失败并触发fallback，则视为定位正确"
+}
+
+字段说明：
+
+1. expected_root_stage
+- 正确根因阶段
+
+2. expected_root_component
+- 正确根因组件
+
+3. expected_error_type
+- 正确故障类型
+
+4. expected_fallback_triggered
+- 是否预期触发 fallback
+
+5. expected_fallback_action
+- 预期触发的兜底动作
+
+6. expected_trace_keywords
+- 理想情况下在 trace / log / metadata 中应能看到的关键词
+
+7. expected_user_visible_result
+- 用户侧可见结果
+
+8. expected_trace_required_fields
+- 如果 trace 缺少这些字段，则说明观测不足
+
+9. judge_rule
+- 用于评估“是否定位正确”的规则
+
+
+六、文件三：runtime_trace_troubleshooting_tasks.jsonl
+
+作用：
+- 定义每个故障 case 对应的排查任务
+- 用于实际测“排查耗时”
+
+字段模板如下：
+
+{
+  "task_id": "trace_task_001",
+  "case_id": "trace_case_001",
+  "task_type": "ROOT_CAUSE_LOCATION",
+  "task_prompt": "请根据给定 trace / 日志，指出这次问题最先发生在哪个阶段，根因是什么，是否发生了 fallback。",
+  "expected_output_fields": ["root_stage", "root_component", "error_type", "fallback_triggered"],
+  "time_measure_start": "看到样本后开始计时",
+  "time_measure_end": "首次给出正确根因阶段与异常类型时停止计时",
+  "difficulty": "MEDIUM"
+}
+
+字段说明：
+
+1. task_type
+- 推荐值：
+  ROOT_CAUSE_LOCATION
+  FALLBACK_ANALYSIS
+  USER_IMPACT_ANALYSIS
+  TRACE_COMPLETENESS_CHECK
+  STAGE_LATENCY_DIAGNOSIS
+
+2. task_prompt
+- 给执行测试的人或 AI 的排查任务提示
+
+3. expected_output_fields
+- 排查输出至少应包含哪些字段
+
+4. time_measure_start / time_measure_end
+- 定义计时规则
+
+5. difficulty
+- 推荐值：
+  EASY
+  MEDIUM
+  HARD
+
+
+七、文件四：runtime_trace_run_log.csv
+
+作用：
+- 记录实际测试执行结果
+- 用于最后算效率提升百分比
+
+建议字段如下：
+
+run_id,case_id,task_id,test_mode,operator,start_time,end_time,duration_seconds,is_correct_root_stage,is_correct_root_component,is_correct_error_type,is_correct_fallback_judgement,final_score,notes
+
+字段说明：
+
+1. test_mode
+- 推荐值：
+  NO_TRACE
+  BASIC_LOG
+  TRACE_ONLY
+  TRACE_PLUS_DASHBOARD
+
+2. operator
+- 执行人，可以是：
+  human_1
+  human_2
+  ai_assisted
+
+3. duration_seconds
+- 实际排查耗时
+
+4. is_correct_root_stage
+- 是否定位到正确阶段
+
+5. is_correct_root_component
+- 是否定位到正确组件
+
+6. is_correct_error_type
+- 是否识别出正确异常类型
+
+7. is_correct_fallback_judgement
+- 是否判断出 fallback 是否触发及触发动作
+
+8. final_score
+- 可自行定义，例如：
+  正确阶段 25 分
+  正确组件 25 分
+  正确异常类型 25 分
+  正确 fallback 判断 25 分
+
+
+八、推荐测试样本池设计
+
+第一版建议覆盖以下故障类型：
+
+1. 评分阶段异常
+- ScoreAgent 返回非法 JSON
+- ScoreAgent 返回空字符串
+- parseScore 触发 fallback
+
+2. 检索规划异常
+- planner 输出非法 JSON
+- retrieval plan 为空
+- retrieval budget 用尽
+
+3. 图谱增强异常
+- GraphRAG 检索超时
+- graph mode 路由异常
+- 图谱上下文为空后 fallback
+
+4. Prompt 组装异常
+- recent context 读取异常
+- profile / summary 缺失
+- promptContext 构造失败
+
+5. 生成阶段异常
+- FollowUpAgent / TechInterviewerAgent 超时
+- generation 返回空结果
+- generation 触发安全兜底话术
+
+6. 存储与基础设施异常
+- Redis miss
+- pgvector 查询失败
+- trace 持久化失败
+- MQ 面后处理失败
+
+
+九、推荐样本数量
+
+A. 超轻量版：先验证流程
+
+适用场景：
+- 先跑通 Runtime-Trace 评测流程
+
+建议数量：
+- runtime_trace_cases.jsonl：12 到 15 条
+- runtime_trace_expected_labels.jsonl：与 case 一一对应
+- runtime_trace_troubleshooting_tasks.jsonl：12 到 15 条
+
+推荐分布：
+- 评分异常：2 条
+- 检索规划异常：2 条
+- 图谱增强异常：2 条
+- Prompt 异常：2 条
+- 生成异常：2 条
+- 基础设施异常：2 到 5 条
+
+
+B. 轻量正式版：推荐的最小正式版
+
+适用场景：
+- 产出第一版“排查效率提升 / 异常定位效率提升”数据
+
+建议数量：
+- runtime_trace_cases.jsonl：20 到 30 条
+- runtime_trace_expected_labels.jsonl：20 到 30 条
+- runtime_trace_troubleshooting_tasks.jsonl：20 到 30 条
+
+推荐分布：
+- 评分异常：4 条
+- 检索规划异常：4 条
+- 图谱增强异常：4 条
+- Prompt 异常：3 条
+- 生成异常：3 条
+- 基础设施异常：4 到 8 条
+
+
+C. 中等可信版：适合最终简历使用
+
+适用场景：
+- 希望效率指标更稳、更有说服力
+
+建议数量：
+- runtime_trace_cases.jsonl：40 到 60 条
+- 每类问题至少覆盖 5 条
+
+
+十、效率指标怎么计算
+
+一共有两类指标：
+
+1. 问题排查效率提升
+
+推荐定义：
+- 从拿到故障样本开始，到首次给出“正确根因阶段 + 正确异常类型 + 正确 fallback 判断”为止的时间
+
+计算方式：
+- baseline_avg_time = 无 trace 或只有普通日志时的平均排查耗时
+- trace_avg_time = 使用 Runtime-Trace 后的平均排查耗时
+- 排查效率提升 = (baseline_avg_time - trace_avg_time) / baseline_avg_time
+
+2. 异常定位效率提升
+
+推荐定义：
+- 在限定时间内，正确定位根因阶段 / 根因组件 / 异常类型的能力提升
+
+可用两种口径：
+
+口径 A：时间口径
+- baseline_root_cause_time
+- trace_root_cause_time
+- 定位效率提升 = (baseline_root_cause_time - trace_root_cause_time) / baseline_root_cause_time
+
+口径 B：正确率口径
+- baseline_accuracy
+- trace_accuracy
+- 定位正确率提升 = trace_accuracy - baseline_accuracy
+
+如果简历上想写“效率提升 XX%”，优先使用时间口径。
+
+
+十一、测试执行模式建议
+
+建议至少做两组测试模式：
+
+1. 基线组
+- NO_TRACE 或 BASIC_LOG
+- 只能看基础日志或非常少的上下文
+
+2. 实验组
+- TRACE_ONLY 或 TRACE_PLUS_DASHBOARD
+- 可查看 trace_event、stage latency、fallback 信息、metadata
+
+这样才能得出“提升 XX%”。
+
+如果不想做双组对照，也可以只测当前值，例如：
+- 平均问题排查耗时控制在 XX 秒
+- 异常根因定位正确率达到 XX%
+
+但如果你要写“提升 XX%”，建议保留对照组。
+
+
+十二、推荐当前采用的方案
+
+当前最推荐：
+- 轻量正式版
+
+建议配置：
+- case：24 条左右
+- 覆盖 6 大故障类
+- 每条 case 都有标准根因标签
+- 每条 case 都配置一条排查任务
+- 至少做两轮对照：
+  BASIC_LOG
+  TRACE_ONLY
+
+原因：
+- 样本量不大
+- 人工和 AI 都可以参与排查实验
+- 足够跑出第一版“排查效率提升 / 定位效率提升”结果
+
+
+十三、给 AI 生成测试集的建议指令骨架
+
+可直接参考以下指令：
+
+请为一个基于多阶段 Agent Runtime 的系统生成 Runtime-Trace 测试数据集，包含以下三份 JSONL 文件：
+
+1. runtime_trace_cases.jsonl
+2. runtime_trace_expected_labels.jsonl
+3. runtime_trace_troubleshooting_tasks.jsonl
+
+要求：
+- cases 共 24 条
+- 覆盖评分异常、检索规划异常、图谱增强异常、Prompt 组装异常、生成异常、基础设施异常
+- 每条 case 都必须有：
+  case_id
+  pipeline_stage
+  fault_injection_type
+  fault_injection_point
+  expected_runtime_behavior
+- 每条 expected_labels 都必须包含：
+  expected_root_stage
+  expected_root_component
+  expected_error_type
+  expected_fallback_triggered
+- 每条 troubleshooting task 都必须定义：
+  task_prompt
+  expected_output_fields
+  time_measure_start
+  time_measure_end
+- 输出严格 JSONL，不要附加解释
+
+
+十三点五、轻量正式版 AI 生成提示词（可直接复制使用）
+
+下面这段提示词可直接发给 AI，用于生成一套“轻量正式版”的 Runtime-Trace 测试数据集。
+
+提示词如下：
+
+你要为一个基于多阶段 Agent Runtime 的 AI 面试系统生成 Runtime-Trace 测试数据集，用于评估：
+
+1. 问题排查效率
+2. 异常定位效率
+
+请严格输出三份 JSONL 数据内容，不要附加解释文字，不要输出 Markdown 代码块。
+
+需要生成的文件：
+
+1. runtime_trace_cases.jsonl
+2. runtime_trace_expected_labels.jsonl
+3. runtime_trace_troubleshooting_tasks.jsonl
+
+生成规模要求：
+
+- 共生成 24 条 case
+- 三个文件中的样本必须一一对应
+- 每条 case 都必须有唯一 case_id
+- 每条 task 都必须绑定到已有 case_id
+
+场景背景：
+
+这是一个 Java + Spring Boot + LangChain4j 的多阶段 AI 面试系统，运行链路包括：
+- SCORING
+- RETRIEVAL_PLANNING
+- GRAPH_RAG_ENRICHMENT
+- DECISIONING
+- AGGREGATION
+- PROMPT_ASSEMBLY
+- GENERATION
+- POST_PROCESS
+- TRACE_PERSISTENCE
+
+系统具备以下运行时特征：
+- 各阶段有 fallback
+- 记录 stage latency
+- 记录 fallbackTriggered
+- 记录 graph mode / retrieval metadata
+- trace 可异步持久化
+
+请生成的 24 条 case 覆盖以下 6 类异常，每类 4 条：
+
+1. 评分异常
+- ScoreAgent 返回非法 JSON
+- ScoreAgent 返回空字符串
+- parseScore fallback
+- 评分阶段超时
+
+2. 检索规划异常
+- planner 输出非法 JSON
+- retrieval plan 为空
+- retrieval budget exhausted
+- planner 内部异常
+
+3. 图谱增强异常
+- GraphRAG 查询超时
+- graph mode 路由异常
+- graph retriever 返回空结果并触发 fallback
+- graph rerank 异常
+
+4. Prompt 组装异常
+- recent context 读取失败
+- profileJson 缺失
+- summaryMd 缺失
+- promptContext 组装异常
+
+5. 生成异常
+- FollowUpAgent 超时
+- TechInterviewerAgent 返回空输出
+- generation 非法结构
+- generation 触发安全兜底话术
+
+6. 基础设施异常
+- Redis miss
+- pgvector 查询失败
+- trace 持久化失败
+- MQ 面后处理失败
+
+文件 1：runtime_trace_cases.jsonl
+
+每条记录必须包含以下字段：
+- case_id
+- case_name
+- category
+- severity
+- scenario
+- entry_api
+- pipeline_stage
+- fault_injection_type
+- fault_injection_point
+- user_id
+- session_id
+- question
+- answer
+- weak_topic
+- expected_user_impact
+- expected_runtime_behavior
+- notes
+
+字段约束：
+- category 只能从以下取值：
+  LLM_OUTPUT
+  LLM_TIMEOUT
+  RETRIEVAL_TIMEOUT
+  REDIS_MISS
+  PGVECTOR_ERROR
+  GRAPH_ERROR
+  MQ_ERROR
+  TRACE_PERSIST_ERROR
+  PROMPT_ASSEMBLY_ERROR
+  GENERATION_ERROR
+- severity 只能从 LOW / MEDIUM / HIGH / CRITICAL 中取值
+- scenario 统一使用 INTERVIEW_RUNTIME 或 POST_PROCESS
+- entry_api 优先使用 answerQuestion、finishInterview
+- pipeline_stage 必须和故障类型匹配
+
+文件 2：runtime_trace_expected_labels.jsonl
+
+每条记录必须包含以下字段：
+- case_id
+- expected_root_stage
+- expected_root_component
+- expected_error_type
+- expected_fallback_triggered
+- expected_fallback_action
+- expected_trace_keywords
+- expected_user_visible_result
+- expected_trace_required_fields
+- judge_rule
+
+要求：
+- expected_root_stage 必须与 case 中的 pipeline_stage 对应
+- expected_trace_keywords 至少包含 3 个关键词
+- expected_trace_required_fields 至少包含：
+  stage
+  latencyMs
+  metadata
+  fallbackTriggered
+
+文件 3：runtime_trace_troubleshooting_tasks.jsonl
+
+每条记录必须包含以下字段：
+- task_id
+- case_id
+- task_type
+- task_prompt
+- expected_output_fields
+- time_measure_start
+- time_measure_end
+- difficulty
+
+要求：
+- task_type 只能从以下取值：
+  ROOT_CAUSE_LOCATION
+  FALLBACK_ANALYSIS
+  USER_IMPACT_ANALYSIS
+  TRACE_COMPLETENESS_CHECK
+  STAGE_LATENCY_DIAGNOSIS
+- 以 ROOT_CAUSE_LOCATION 为主，至少 12 条
+- difficulty 在 EASY / MEDIUM / HARD 中分布均衡
+- expected_output_fields 至少包含：
+  root_stage
+  root_component
+  error_type
+  fallback_triggered
+
+内容风格要求：
+
+- 问题、回答、弱项主题要贴近技术面试场景
+- 主题优先覆盖：
+  Redis缓存一致性
+  MySQL索引
+  JVM GC
+  Spring事务
+  RabbitMQ可靠性
+  高并发设计
+  电商订单系统
+- 样本描述要具体，不能写成抽象模板句
+- 每个 case 的 expected_runtime_behavior 必须可执行、可判断
+- judge_rule 必须明确“什么算定位正确”
+
+输出要求：
+
+- 先输出 runtime_trace_cases.jsonl 的全部 24 行
+- 再输出 runtime_trace_expected_labels.jsonl 的全部 24 行
+- 再输出 runtime_trace_troubleshooting_tasks.jsonl 的全部 24 行
+- 不要写任何标题
+- 不要写解释
+- 不要写 Markdown
+
+
+十四、补充说明
+
+1. 这类测试本质上测的是“可观测性带来的排障效率提升”，不是单纯功能正确性。
+
+2. 因此必须有：
+- 故障样本
+- 标准答案
+- 计时规则
+- 对照模式
+
+3. 如果后续只想测“当前值”，而不是“提升 XX%”，则可简化为：
+- 平均排查耗时
+- 平均根因定位耗时
+- 定位正确率
+
+4. 如果后续要把结果写进简历，最推荐的两种表达方式是：
+- 问题排查平均耗时由 XX 秒缩短至 XX 秒，效率提升 XX%
+- 异常根因定位平均耗时由 XX 秒缩短至 XX 秒，定位效率提升 XX%

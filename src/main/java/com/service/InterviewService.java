@@ -1,5 +1,6 @@
 package com.service;
 
+import com.ai.Stream.StreamingChunkHandler;
 import com.common.BizException;
 import com.common.ErrorCode;
 import com.ai.agent.TechInterviewerAgent;
@@ -24,9 +25,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.dto.mq.InterviewPostProcessMessage;
 import com.dto.mq.InterviewPostProcessProduce;
+import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -69,8 +72,9 @@ public class InterviewService {
          * @return 第一题
          */
         @Transactional(rollbackFor = Exception.class)
-        public InterviewReplyDTO startInterview(Long userId, String interviewType, String targetRole, String topic,
+        public SseEmitter startInterviewStream(Long userId, String interviewType, String targetRole, String topic,
                         String projectSummary) {
+                SseEmitter emitter = new SseEmitter(0L);
                 validateStartRequest(userId, interviewType, targetRole, topic, projectSummary);
 
                 // 1.创建面试
@@ -87,7 +91,12 @@ public class InterviewService {
                 }
 
                 // 2.调用agent编排器生成第一题目
-                String question = agentOrchestrator.generateFirstQuestion(userId, topic, targetRole, projectSummary);
+                String question = agentOrchestrator.generateFirstQuestionStream(
+                                userId,
+                                topic,
+                                targetRole,
+                                projectSummary,
+                                new SimpleSseStreamingHandler(emitter));
                 if (isBlank(question)) {
                         throw new BizException(ErrorCode.INTERNAL_ERROR, "AI未生成面试问题");
                 }
@@ -100,11 +109,14 @@ public class InterviewService {
                                 question);
 
                 // 4. 返回给前端
-                InterviewReplyDTO reply = new InterviewReplyDTO();
-                reply.setSessionId(sessionId);
-                reply.setAction(ACTION_QUESTION);
-                reply.setContent(question);
-                return reply;
+                /*
+                 * InterviewReplyDTO reply = new InterviewReplyDTO();
+                 * reply.setSessionId(sessionId);
+                 * reply.setAction(ACTION_QUESTION);
+                 * reply.setContent(question);
+                 */
+                emitter.complete();
+                return emitter;
         }
 
         /**
@@ -117,15 +129,17 @@ public class InterviewService {
          * @return AI下一步回复
          */
         @Transactional(rollbackFor = Exception.class)
-        public InterviewReplyDTO answerQuestion(
+        public SseEmitter answerQuestionStream(
                         Long userId,
                         Long sessionId,
                         String topic,
                         String answer) {
+
                 validateRequired(userId, "用户ID不能为空");
                 validateRequired(sessionId, "面试ID不能为空");
                 validateText(topic, "面试主题不能为空");
                 validateText(answer, "回答内容不能为空");
+                SseEmitter emitter = new SseEmitter(0L);
                 InterviewSession session = assertSessionInProgress(userId, sessionId);
 
                 // 1. AI 调用限流：本接口会触发评分 Agent、追问决策 Agent、面试官 Agent。
@@ -158,13 +172,18 @@ public class InterviewService {
 
                 // 6. 调用 AgentOrchestrator：
                 // 评分 → 决策 → 生成追问/下一题
-                OrchestratorResult result = agentOrchestrator.handleAnswerWithMultiAgentDecision(userId, sessionId,
+                OrchestratorResult result = agentOrchestrator.handleAnswerWithMultiAgentDecision(
+                                userId,
+                                sessionId,
                                 topic,
                                 session.getTargetRole(),
                                 loadResumeText(userId),
                                 buildProjectSummary(userId),
-                                question, answer, memoryService.getLatestProfileJson(userId),
-                                memoryService.getLatestSummaryMd(userId, "overall"));
+                                question,
+                                answer,
+                                memoryService.getLatestProfileJson(userId),
+                                memoryService.getLatestSummaryMd(userId, "overall"),
+                                new SimpleSseStreamingHandler(emitter));
                 InterviewReplyDTO reply = new InterviewReplyDTO();
                 reply.setSessionId(sessionId);
                 // 7. 保存 AI 新问题 / 追问
@@ -180,8 +199,14 @@ public class InterviewService {
                                 reply.getContent());
                 // 第一版先不单独保存 score 到 interview_score 表
                 // 后面可以把 reply.getScoreJson() 解析后写入评分表
+                emitter.complete();
+                return emitter;
+        }
 
-                return reply;
+        public void stopStream(Long userId, Long sessionId) {
+                validateRequired(userId, "用户ID不能为空");
+                validateRequired(sessionId, "面试ID不能为空");
+                assertSessionInProgress(userId, sessionId);
         }
 
         /**
@@ -476,5 +501,45 @@ public class InterviewService {
 
         private boolean isBlank(String value) {
                 return value == null || value.isBlank();
+        }
+
+        private static final class SimpleSseStreamingHandler implements StreamingChunkHandler {
+                private final SseEmitter emitter;
+
+                private SimpleSseStreamingHandler(SseEmitter emitter) {
+                        this.emitter = emitter;
+                }
+
+                @Override
+                public void onStart(String requestId) {
+                        try {
+                                emitter.send(SseEmitter.event().name("start").data(requestId));
+                        } catch (IOException e) {
+                                throw new IllegalStateException("SSE start event send failed", e);
+                        }
+                }
+
+                @Override
+                public void onChunk(String chunk) {
+                        try {
+                                emitter.send(SseEmitter.event().name("chunk").data(chunk));
+                        } catch (IOException e) {
+                                throw new IllegalStateException("SSE chunk event send failed", e);
+                        }
+                }
+
+                @Override
+                public void onComplete(String fullContent) {
+                        try {
+                                emitter.send(SseEmitter.event().name("complete").data(fullContent));
+                        } catch (IOException e) {
+                                throw new IllegalStateException("SSE complete event send failed", e);
+                        }
+                }
+
+                @Override
+                public void onError(Throwable throwable) {
+                        emitter.completeWithError(throwable);
+                }
         }
 }

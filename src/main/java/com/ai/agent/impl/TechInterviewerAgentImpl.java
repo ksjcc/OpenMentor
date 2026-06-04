@@ -1,5 +1,6 @@
 package com.ai.agent.impl;
 
+import com.ai.Stream.StreamingChunkHandler;
 import com.ai.agent.TechInterviewerAgent;
 import com.ai.agent.support.AbstractSafeAgentSupport;
 import com.ai.client.LlmClient;
@@ -13,9 +14,11 @@ public class TechInterviewerAgentImpl extends AbstractSafeAgentSupport implement
     }
 
     @Override
-    public String askQuestion(String input) {
-        return safeChat(
+    public String streamQuestion(String requestId, String input, StreamingChunkHandler handler) {
+        return safeStreamChat(
+                requestId,
                 input,
-                () -> "请你结合一个实际项目场景，说明 Redis 缓存击穿的成因，以及你会如何设计兜底方案？");
+                handler,
+                () -> "请你先介绍一下这个问题的核心概念，并结合项目经验展开说明。");
     }
 }

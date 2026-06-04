@@ -1,7 +1,7 @@
 package com.ai.agent.support;
 
+import com.ai.Stream.StreamingChunkHandler;
 import com.ai.client.LlmClient;
-
 import java.util.function.Supplier;
 
 public abstract class AbstractSafeAgentSupport {
@@ -14,5 +14,10 @@ public abstract class AbstractSafeAgentSupport {
 
     protected String safeChat(String prompt, Supplier<String> fallbackSupplier) {
         return llmClient.safeChat(prompt, fallbackSupplier);
+    }
+
+    protected String safeStreamChat(String requestId, String prompt, StreamingChunkHandler handler,
+            Supplier<String> fallbackSupplier) {
+        return llmClient.streamChat(requestId, prompt, handler, fallbackSupplier);
     }
 }

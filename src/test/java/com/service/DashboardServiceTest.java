@@ -2,6 +2,8 @@ package com.service;
 
 import com.dto.dashboard.DashboardDTO;
 import com.dto.dashboard.LearningRecommendationDTO;
+import com.dto.extraction.KnowledgeExtractionResult;
+import com.dto.extraction.WeaknessDTO;
 import com.entity.InterviewSession;
 import com.entity.UserProfile;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -41,6 +43,9 @@ class DashboardServiceTest {
   @Mock
   private LearningRecommendationService learningRecommendationService;
 
+  @Mock
+  private JsonParseService jsonParseService;
+
   @Test
   void getDashboardUsesMergedUserProfileForSkillsAndWeaknesses() {
     UserProfile profile = new UserProfile();
@@ -70,6 +75,15 @@ class DashboardServiceTest {
     when(userProfileMapper.selectOne(any())).thenReturn(profile);
     when(interviewSessionMapper.selectList(any())).thenReturn(List.of(session));
     when(flashcardMapper.selectCount(any())).thenReturn(0L);
+    WeaknessDTO jvmWeakness = new WeaknessDTO();
+    jvmWeakness.setName("JVM GC");
+    jvmWeakness.setLevel(2);
+    WeaknessDTO redisWeakness = new WeaknessDTO();
+    redisWeakness.setName("Redis缓存一致性");
+    redisWeakness.setLevel(4);
+    KnowledgeExtractionResult extraction = new KnowledgeExtractionResult();
+    extraction.setWeaknesses(List.of(jvmWeakness, redisWeakness));
+    when(jsonParseService.parseExtractionLenient(any())).thenReturn(extraction);
     when(learningRecommendationService.generate(1L)).thenReturn(LearningRecommendationDTO.builder()
         .weakTopics(List.of("Redis缓存一致性", "JVM GC"))
         .roleGapSuggestions(List.of("建议优先补强 Redis缓存一致性 的设计取舍表达。"))
@@ -83,7 +97,8 @@ class DashboardServiceTest {
         interviewSessionMapper,
         flashcardMapper,
         learningRecommendationService,
-        new ObjectMapper());
+        new ObjectMapper(),
+        jsonParseService);
 
     DashboardDTO dashboard = service.getDashboard(1L);
 

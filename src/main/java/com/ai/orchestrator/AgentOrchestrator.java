@@ -8,8 +8,11 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
+import static java.util.Map.entry;
+
 import org.springframework.stereotype.Component;
 
+import com.ai.Stream.StreamingChunkHandler;
 import com.ai.agent.FollowUpAgent;
 import com.ai.agent.KnowledgeExtractorAgent;
 import com.ai.agent.TechInterviewerAgent;
@@ -32,6 +35,8 @@ import com.ai.prompt.PromptBudgetAllocator;
 import com.ai.prompt.PromptBuilder;
 import com.ai.prompt.PromptContext;
 import com.ai.prompt.PromptTemplates;
+import com.ai.runtime.PromptRuntimeMetrics;
+import com.ai.runtime.PromptRuntimeTracker;
 import com.ai.rag.HybridRetriever;
 import com.dto.InterviewReplyDTO;
 import com.dto.decision.AgentDecisionDTO;
@@ -78,32 +83,49 @@ public class AgentOrchestrator {
     /**
      * 生成面试第一题。
      */
-    public String generateFirstQuestion(Long userId, String topic, String targetRole, String projectSummary) {
-        String profileJson = memoryService.getLastProfileJson(userId);
-        String summaryMd = memoryService.getLastSummaryMd(userId, "interview-extraction");
-        List<String> relatedMemories = hybridRetriever.retrieve(userId, topic, 5);
-        UserProfile profile = profileService.getProfile(userId);
-        String effectiveResumeText = firstNonBlank(
-                projectSummary,
-                profile == null ? null : profile.getResumeText());
+    public String generateFirstQuestionStream(Long userId, String topic, String targetRole, String projectSummary,
+            StreamingChunkHandler handler) {
+        PromptRuntimeTracker.beginRequest();
+        try {
+            String requestId = UUID.randomUUID().toString();
+            handler.onStart(requestId);
 
-        PromptContext firstQuestionContext = PromptContext.builder()
-                .userId(userId)
-                .profileJson(profileJson)
-                .summaryMd(summaryMd)
-                .ragMemories(relatedMemories)
-                .topic(topic)
-                .task(PromptTemplates.TASK_NEW_QUESTION)
-                .projectSummary(projectSummary)
-                .targetRole(targetRole)
-                .resumeText(effectiveResumeText)
-                .build();
-        PromptContext compressedContext = promptBudgetAllocator.compress(
-                firstQuestionContext,
-                PromptActionType.NEW_QUESTION);
-        String input = promptBuilder.buildQuestionPrompt(compressedContext);
+            String profileJson = memoryService.getLastProfileJson(userId);
+            String summaryMd = memoryService.getLastSummaryMd(userId, "interview-extraction");
+            List<String> relatedMemories = hybridRetriever.retrieve(userId, topic, 5);
+            UserProfile profile = profileService.getProfile(userId);
+            String effectiveResumeText = firstNonBlank(
+                    projectSummary,
+                    profile == null ? null : profile.getResumeText());
 
-        return techInterviewerAgent.askQuestion(input);
+            PromptContext firstQuestionContext = PromptContext.builder()
+                    .userId(userId)
+                    .profileJson(profileJson)
+                    .summaryMd(summaryMd)
+                    .ragMemories(relatedMemories)
+                    .topic(topic)
+                    .task(PromptTemplates.TASK_NEW_QUESTION)
+                    .projectSummary(projectSummary)
+                    .targetRole(targetRole)
+                    .resumeText(effectiveResumeText)
+                    .build();
+            PromptContext compressedContext = promptBudgetAllocator.compress(
+                    firstQuestionContext,
+                    PromptActionType.NEW_QUESTION);
+            String input = promptBuilder.buildQuestionPrompt(compressedContext);
+            String fullContent = techInterviewerAgent.streamQuestion(
+                    requestId,
+                    input,
+                    handler);
+            PromptRuntimeTracker.markRequestCompleted(true, fullContent != null && !fullContent.isBlank());
+            return fullContent;
+        } catch (Exception ex) {
+            handler.onError(ex);
+            PromptRuntimeTracker.markRequestCompleted(false, false);
+            throw ex;
+        } finally {
+            PromptRuntimeTracker.clear();
+        }
     }
 
     /**
@@ -120,7 +142,8 @@ public class AgentOrchestrator {
     /**
      * 兼容旧回答接口，内部统一走新的实时流水线。
      */
-    public InterviewReplyDTO handleAnswer(Long userId, String topic, String question, String answer) {
+    public InterviewReplyDTO handleAnswerStream(Long userId, String topic, String question, String answer,
+            StreamingChunkHandler handler) {
         UserProfile profile = profileService.getProfile(userId);
         OrchestratorResult result = handleAnswerWithMultiAgentDecision(
                 userId,
@@ -132,7 +155,8 @@ public class AgentOrchestrator {
                 question,
                 answer,
                 memoryService.getLatestProfileJson(userId),
-                memoryService.getLatestSummaryMd(userId, "overall"));
+                memoryService.getLatestSummaryMd(userId, "overall"),
+                handler);
 
         InterviewReplyDTO reply = new InterviewReplyDTO();
         reply.setAction(result.getAction());
@@ -140,6 +164,7 @@ public class AgentOrchestrator {
         reply.setScoreJson(result.getScoreJson());
         reply.setStageLatencyMs(result.getStageLatencyMs());
         reply.setTotalLatencyMs(result.getTotalLatencyMs());
+        reply.setPromptRuntimeMetrics(result.getPromptRuntimeMetrics());
         return reply;
     }
 
@@ -156,159 +181,170 @@ public class AgentOrchestrator {
             String question,
             String answer,
             String profileJson,
-            String summaryMd) {
-        TraceContext trace = new TraceContext();
-        trace.setTraceId(UUID.randomUUID().toString());
-        OrchestratorMetrics metrics = new OrchestratorMetrics();
-        PipelineRuntime runtime = new PipelineRuntime();
-        runtime.initialize();
-        InterviewPipelineContext context = InterviewPipelineContext.builder()
-                .userId(userId)
-                .sessionId(sessionId)
-                .topic(topic)
-                .targetRole(targetRole)
-                .resumeText(resumeText)
-                .projectSummary(projectSummary)
-                .question(question)
-                .answer(answer)
-                .realTime(true)
-                .retrievalBudget(retrievalBudgetService.createBudget())
-                .pipelineRuntime(runtime)
-                .traceContext(trace)
-                .build();
+            String summaryMd,
+            StreamingChunkHandler handler) {
+        PromptRuntimeTracker.beginRequest();
+        try {
+            TraceContext trace = new TraceContext();
+            trace.setTraceId(UUID.randomUUID().toString());
+            OrchestratorMetrics metrics = new OrchestratorMetrics();
+            PipelineRuntime runtime = new PipelineRuntime();
+            runtime.initialize();
+            InterviewPipelineContext context = InterviewPipelineContext.builder()
+                    .userId(userId)
+                    .sessionId(sessionId)
+                    .topic(topic)
+                    .targetRole(targetRole)
+                    .resumeText(resumeText)
+                    .projectSummary(projectSummary)
+                    .question(question)
+                    .answer(answer)
+                    .realTime(true)
+                    .retrievalBudget(retrievalBudgetService.createBudget())
+                    .pipelineRuntime(runtime)
+                    .traceContext(trace)
+                    .build();
 
-        long stageStart = System.nanoTime();
-        pipelineStageExecutor.execute(
-                context,
-                PipelineStageName.SCORING,
-                () -> scoringStage.execute(context),
-                (ctx, ex) -> {
-                    ctx.setScoreJson("{}");
-                    ctx.setScoreResult(new ScoreResultDTO());
-                    return StageRecoveryResult.defaultValue(ex.getMessage(), "use empty score result");
-                });
-        metrics.recordStage("scoring", stageStart);
+            long stageStart = System.nanoTime();
+            pipelineStageExecutor.execute(
+                    context,
+                    PipelineStageName.SCORING,
+                    () -> scoringStage.execute(context),
+                    (ctx, ex) -> {
+                        ctx.setScoreJson("{}");
+                        ctx.setScoreResult(new ScoreResultDTO());
+                        return StageRecoveryResult.defaultValue(ex.getMessage(), "use empty score result");
+                    });
+            metrics.recordStage("scoring", stageStart);
 
-        context.setWeakTopic(resolveWeakTopic(context.getScoreResult(), topic));
+            context.setWeakTopic(resolveWeakTopic(context.getScoreResult(), topic));
 
-        stageStart = System.nanoTime();
-        pipelineStageExecutor.execute(
-                context,
-                PipelineStageName.RETRIEVAL_PLANNING,
-                () -> retrievalPlanningStage.execute(context),
-                (ctx, ex) -> {
-                    ctx.setRetrievalPlan(com.dto.Retrieval.RetrievalPlanDTO.builder()
-                            .primaryRetriever("MEMORY_RAG")
-                            .needMemory(true)
-                            .needVector(false)
-                            .needGraph(false)
-                            .needHyde(false)
-                            .enableKeywordFallback(true)
-                            .topK(2)
-                            .query(firstNonBlank(ctx.getWeakTopic(), ctx.getQuestion(), ""))
-                            .reason("runtime fallback retrieval plan")
-                            .retrievalBudget(1)
-                            .build());
-                    return StageRecoveryResult.fallback(ex.getMessage(), "fallback to conservative retrieval plan");
-                });
-        metrics.recordStage("retrievalPlanning", stageStart);
+            stageStart = System.nanoTime();
+            pipelineStageExecutor.execute(
+                    context,
+                    PipelineStageName.RETRIEVAL_PLANNING,
+                    () -> retrievalPlanningStage.execute(context),
+                    (ctx, ex) -> {
+                        ctx.setRetrievalPlan(com.dto.Retrieval.RetrievalPlanDTO.builder()
+                                .primaryRetriever("MEMORY_RAG")
+                                .needMemory(true)
+                                .needVector(false)
+                                .needGraph(false)
+                                .needHyde(false)
+                                .enableKeywordFallback(true)
+                                .topK(2)
+                                .query(firstNonBlank(ctx.getWeakTopic(), ctx.getQuestion(), ""))
+                                .reason("runtime fallback retrieval plan")
+                                .retrievalBudget(1)
+                                .build());
+                        return StageRecoveryResult.fallback(ex.getMessage(), "fallback to conservative retrieval plan");
+                    });
+            metrics.recordStage("retrievalPlanning", stageStart);
 
-        stageStart = System.nanoTime();
-        pipelineStageExecutor.execute(
-                context,
-                PipelineStageName.GRAPH_RAG_ENRICHMENT,
-                () -> graphRagEnrichmentStage.execute(context),
-                (ctx, ex) -> {
-                    ctx.setRetrievalContext(List.of());
-                    ctx.setGraphRagContext(List.of());
-                    ctx.setGraphFallbackTriggered(true);
-                    return StageRecoveryResult.fallback(ex.getMessage(), "skip graph enrichment and continue");
-                });
-        metrics.recordStage("graphRagEnrichment", stageStart);
+            stageStart = System.nanoTime();
+            pipelineStageExecutor.execute(
+                    context,
+                    PipelineStageName.GRAPH_RAG_ENRICHMENT,
+                    () -> graphRagEnrichmentStage.execute(context),
+                    (ctx, ex) -> {
+                        ctx.setRetrievalContext(List.of());
+                        ctx.setGraphRagContext(List.of());
+                        ctx.setGraphFallbackTriggered(true);
+                        return StageRecoveryResult.fallback(ex.getMessage(), "skip graph enrichment and continue");
+                    });
+            metrics.recordStage("graphRagEnrichment", stageStart);
 
-        stageStart = System.nanoTime();
-        final List<AgentDecisionDTO>[] decisionHolder = new List[1];
-        pipelineStageExecutor.execute(
-                context,
-                PipelineStageName.DECISIONING,
-                () -> decisionHolder[0] = buildDecisions(userId, context.getWeakTopic(), context.getScoreResult()),
-                (ctx, ex) -> {
-                    decisionHolder[0] = buildDecisionsSerial(userId, context.getWeakTopic(), context.getScoreResult());
-                    return StageRecoveryResult.fallback(ex.getMessage(), "fallback to serial decisioning");
-                });
-        List<AgentDecisionDTO> decisions = decisionHolder[0] == null ? List.of() : decisionHolder[0];
-        metrics.recordStage("decisioning", stageStart);
+            stageStart = System.nanoTime();
+            final List<AgentDecisionDTO>[] decisionHolder = new List[1];
+            pipelineStageExecutor.execute(
+                    context,
+                    PipelineStageName.DECISIONING,
+                    () -> decisionHolder[0] = buildDecisions(userId, context.getWeakTopic(), context.getScoreResult()),
+                    (ctx, ex) -> {
+                        decisionHolder[0] = buildDecisionsSerial(userId, context.getWeakTopic(),
+                                context.getScoreResult());
+                        return StageRecoveryResult.fallback(ex.getMessage(), "fallback to serial decisioning");
+                    });
+            List<AgentDecisionDTO> decisions = decisionHolder[0] == null ? List.of() : decisionHolder[0];
+            metrics.recordStage("decisioning", stageStart);
 
-        stageStart = System.nanoTime();
-        final FinalDecisionDTO[] finalDecisionHolder = new FinalDecisionDTO[1];
-        pipelineStageExecutor.execute(
-                context,
-                PipelineStageName.AGGREGATION,
-                () -> finalDecisionHolder[0] = decisionAggregator.aggregate(decisions),
-                (ctx, ex) -> {
-                    FinalDecisionDTO fallbackDecision = new FinalDecisionDTO();
-                    fallbackDecision.setAction(com.ai.decision.DecisionAction.NEXT);
-                    fallbackDecision.setReason("aggregation fallback to NEXT");
-                    fallbackDecision.setTopic(firstNonBlank(ctx.getWeakTopic(), ctx.getTopic(), ""));
-                    finalDecisionHolder[0] = fallbackDecision;
-                    return StageRecoveryResult.defaultValue(ex.getMessage(), "use NEXT as fallback action");
-                });
-        FinalDecisionDTO finalDecision = finalDecisionHolder[0];
-        metrics.recordStage("aggregation", stageStart);
+            stageStart = System.nanoTime();
+            final FinalDecisionDTO[] finalDecisionHolder = new FinalDecisionDTO[1];
+            pipelineStageExecutor.execute(
+                    context,
+                    PipelineStageName.AGGREGATION,
+                    () -> finalDecisionHolder[0] = decisionAggregator.aggregate(decisions),
+                    (ctx, ex) -> {
+                        FinalDecisionDTO fallbackDecision = new FinalDecisionDTO();
+                        fallbackDecision.setAction(com.ai.decision.DecisionAction.NEXT);
+                        fallbackDecision.setReason("aggregation fallback to NEXT");
+                        fallbackDecision.setTopic(firstNonBlank(ctx.getWeakTopic(), ctx.getTopic(), ""));
+                        finalDecisionHolder[0] = fallbackDecision;
+                        return StageRecoveryResult.defaultValue(ex.getMessage(), "use NEXT as fallback action");
+                    });
+            FinalDecisionDTO finalDecision = finalDecisionHolder[0];
+            metrics.recordStage("aggregation", stageStart);
 
-        stageStart = System.nanoTime();
-        pipelineStageExecutor.execute(
-                context,
-                PipelineStageName.PROMPT_ASSEMBLY,
-                () -> promptAssemblyStage.execute(context, profileJson, summaryMd, finalDecision),
-                (ctx, ex) -> {
-                    ctx.setPromptContext(PromptContext.builder()
-                            .userId(ctx.getUserId())
-                            .sessionId(ctx.getSessionId())
-                            .profileJson(profileJson)
-                            .summaryMd(summaryMd)
-                            .ragMemories(ctx.getRetrievalContext() == null ? List.of() : ctx.getRetrievalContext())
-                            .recentContext("暂无短期上下文。")
-                            .currentQuestion(ctx.getQuestion())
-                            .currentAnswer(ctx.getAnswer())
-                            .scoreJson(ctx.getScoreJson())
-                            .topic(finalDecision == null ? ctx.getTopic() : finalDecision.getTopic())
-                            .targetRole(ctx.getTargetRole())
-                            .resumeText(ctx.getResumeText())
-                            .projectSummary(ctx.getProjectSummary())
-                            .graphReasoning(finalDecision == null ? "" : finalDecision.getReason())
-                            .build());
-                    return StageRecoveryResult.defaultValue(ex.getMessage(), "use simplified prompt context");
-                });
-        metrics.recordStage("promptAssembly", stageStart);
+            stageStart = System.nanoTime();
+            pipelineStageExecutor.execute(
+                    context,
+                    PipelineStageName.PROMPT_ASSEMBLY,
+                    () -> promptAssemblyStage.execute(context, profileJson, summaryMd, finalDecision),
+                    (ctx, ex) -> {
+                        ctx.setPromptContext(PromptContext.builder()
+                                .userId(ctx.getUserId())
+                                .sessionId(ctx.getSessionId())
+                                .profileJson(profileJson)
+                                .summaryMd(summaryMd)
+                                .ragMemories(ctx.getRetrievalContext() == null ? List.of() : ctx.getRetrievalContext())
+                                .recentContext("暂无短期上下文。")
+                                .currentQuestion(ctx.getQuestion())
+                                .currentAnswer(ctx.getAnswer())
+                                .scoreJson(ctx.getScoreJson())
+                                .topic(finalDecision == null ? ctx.getTopic() : finalDecision.getTopic())
+                                .targetRole(ctx.getTargetRole())
+                                .resumeText(ctx.getResumeText())
+                                .projectSummary(ctx.getProjectSummary())
+                                .graphReasoning(finalDecision == null ? "" : finalDecision.getReason())
+                                .build());
+                        return StageRecoveryResult.defaultValue(ex.getMessage(), "use simplified prompt context");
+                    });
+            metrics.recordStage("promptAssembly", stageStart);
 
-        stageStart = System.nanoTime();
-        final String[] nextContentHolder = new String[1];
-        pipelineStageExecutor.execute(
-                context,
-                PipelineStageName.GENERATION,
-                () -> nextContentHolder[0] = generateNextContent(context, finalDecision),
-                (ctx, ex) -> {
-                    nextContentHolder[0] = "我先基于当前上下文继续这轮面试。请你简要补充刚才这道题的核心思路。";
-                    return StageRecoveryResult.defaultValue(ex.getMessage(), "use safe fallback generation");
-                });
-        String nextContent = nextContentHolder[0];
-        metrics.recordStage("generation", stageStart);
+            stageStart = System.nanoTime();
+            String nextContent = generateNextContentStream(context, finalDecision, handler);
+            metrics.recordStage("generation", stageStart);
 
-        OrchestratorResult result = new OrchestratorResult();
-        result.setAction(finalDecision.getAction().name());
-        result.setContent(nextContent);
-        result.setScoreJson(context.getScoreJson());
-        result.setDecisionReason(finalDecision.getReason());
-        result.setAgentDecisions(decisions);
-        result.setStageLatencyMs(metrics.snapshotStageLatencyMs());
-        result.setTotalLatencyMs(metrics.totalLatencyMs());
-        tracePersistenceService.persist(
-                context.getTraceContext(),
-                userId,
-                sessionId);
-        log.info("orchestrator latency total={}ms stages={}", result.getTotalLatencyMs(), result.getStageLatencyMs());
-        return result;
+            boolean finalResponseAvailable = nextContent != null && !nextContent.isBlank();
+            PromptRuntimeTracker.markRequestCompleted(true, finalResponseAvailable);
+            PromptRuntimeMetrics promptRuntimeMetrics = PromptRuntimeTracker.snapshot();
+
+            OrchestratorResult result = new OrchestratorResult();
+            result.setAction(finalDecision.getAction().name());
+            result.setContent(nextContent);
+            result.setScoreJson(context.getScoreJson());
+            result.setDecisionReason(finalDecision.getReason());
+            result.setAgentDecisions(decisions);
+            result.setStageLatencyMs(metrics.snapshotStageLatencyMs());
+            result.setTotalLatencyMs(metrics.totalLatencyMs());
+            result.setPromptRuntimeMetrics(promptRuntimeMetrics);
+            tracePersistenceService.persist(
+                    context.getTraceContext(),
+                    userId,
+                    sessionId);
+            log.info(
+                    "orchestrator latency total={}ms stages={} runtimeMetrics={}",
+                    result.getTotalLatencyMs(),
+                    result.getStageLatencyMs(),
+                    promptRuntimeMetrics);
+            return result;
+        } catch (Exception ex) {
+            handler.onError(ex);
+            PromptRuntimeTracker.markRequestCompleted(false, false);
+            throw ex;
+        } finally {
+            PromptRuntimeTracker.clear();
+        }
     }
 
     private List<AgentDecisionDTO> buildDecisions(
@@ -372,9 +408,11 @@ public class AgentOrchestrator {
         return fallbackTopic;
     }
 
-    private String generateNextContent(InterviewPipelineContext context, FinalDecisionDTO finalDecision) {
+    private String generateNextContentStream(InterviewPipelineContext context, FinalDecisionDTO finalDecision,
+            StreamingChunkHandler handler) {
         long start = System.currentTimeMillis();
         PromptContext promptContext = context.getPromptContext();
+        String requestId = UUID.randomUUID().toString();
         String stageInput;
         String agentName;
         String output;
@@ -383,28 +421,36 @@ public class AgentOrchestrator {
             case FOLLOW_UP -> {
                 stageInput = promptBuilder.buildFollowUpPrompt(promptContext);
                 agentName = "followUpAgent";
-                output = followUpAgent.askFollowUp(stageInput);
+                handler.onStart(requestId);
+                output = followUpAgent.streamFollowUp(requestId, stageInput, handler);
             }
             case HARDER -> {
                 stageInput = promptBuilder.buildHarderQuestionPrompt(promptContext);
                 agentName = "techInterviewerAgent";
-                output = techInterviewerAgent.askQuestion(stageInput);
+                handler.onStart(requestId);
+                output = techInterviewerAgent.streamQuestion(requestId, stageInput, handler);
             }
             case NEXT -> {
                 stageInput = promptBuilder.buildQuestionPrompt(promptContext);
                 agentName = "techInterviewerAgent";
-                output = techInterviewerAgent.askQuestion(stageInput);
+                handler.onStart(requestId);
+                output = techInterviewerAgent.streamQuestion(requestId, stageInput, handler);
             }
             case FINISH -> {
                 stageInput = finalDecision.getReason() == null ? "" : finalDecision.getReason();
                 agentName = "system";
                 output = "本轮面试已完成，接下来将为你生成面试报告和复习建议。";
+                handler.onStart(requestId);
+                handler.onChunk(output);
+                handler.onComplete(output);
             }
             default -> throw new IllegalStateException("Unexpected value: " + finalDecision.getAction());
         }
 
         if (context.getTraceContext() != null) {
             long end = System.currentTimeMillis();
+            PromptRuntimeTracker.recordGeneration(stageInput, output);
+            PromptRuntimeMetrics runtimeMetrics = PromptRuntimeTracker.snapshot();
             TraceEvent event = TraceEvent.builder()
                     .stage("generation")
                     .startTime(start)
@@ -412,16 +458,28 @@ public class AgentOrchestrator {
                     .latencyMs(end - start)
                     .input(stageInput)
                     .output(output)
-                    .metadata(Map.of(
-                            "action", finalDecision.getAction().name(),
-                            "agent", agentName,
-                            "topic",
-                            promptContext == null || promptContext.getTopic() == null ? "" : promptContext.getTopic(),
-                            "graphMode", context.getUsedGraphMode() == null ? "" : context.getUsedGraphMode().name(),
-                            "fallbackTriggered", context.isGraphFallbackTriggered(),
-                            "promptLength", stageInput == null ? 0 : stageInput.length(),
-                            "outputLength", output == null ? 0 : output.length(),
-                            "decisionReason", finalDecision.getReason() == null ? "" : finalDecision.getReason()))
+                    .metadata(Map.ofEntries(
+                            entry("action", finalDecision.getAction().name()),
+                            entry("agent", agentName),
+                            entry("topic",
+                                    promptContext == null || promptContext.getTopic() == null ? ""
+                                            : promptContext.getTopic()),
+                            entry("graphMode",
+                                    context.getUsedGraphMode() == null ? "" : context.getUsedGraphMode().name()),
+                            entry("fallbackTriggered", context.isGraphFallbackTriggered()),
+                            entry("promptLength", stageInput == null ? 0 : stageInput.length()),
+                            entry("outputLength", output == null ? 0 : output.length()),
+                            entry("estimatedGenerationInputTokens", runtimeMetrics.getEstimatedGenerationInputTokens()),
+                            entry("estimatedGenerationOutputTokens",
+                                    runtimeMetrics.getEstimatedGenerationOutputTokens()),
+                            entry("estimatedTotalInputTokens", runtimeMetrics.getEstimatedInputTokens()),
+                            entry("estimatedTotalOutputTokens", runtimeMetrics.getEstimatedOutputTokens()),
+                            entry("estimatedTotalTokens", runtimeMetrics.getEstimatedTotalTokens()),
+                            entry("llmCallCount", runtimeMetrics.getLlmCallCount()),
+                            entry("llmFallbackCount", runtimeMetrics.getLlmFallbackCount()),
+                            entry("tokenEstimationMethod", runtimeMetrics.getTokenEstimationMethod()),
+                            entry("decisionReason",
+                                    finalDecision.getReason() == null ? "" : finalDecision.getReason())))
                     .build();
             context.getTraceContext().addEvent(event);
         }

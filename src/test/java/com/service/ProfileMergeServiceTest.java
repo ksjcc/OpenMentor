@@ -20,6 +20,8 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -33,6 +35,9 @@ class ProfileMergeServiceTest {
 
   @Mock
   private UserProfileMapper userProfileMapper;
+
+  @Mock
+  private JsonParseService jsonParseService;
 
   @Test
   void mergeAndSaveCombinesExtractionAndPersistsBothProfiles() throws Exception {
@@ -77,11 +82,14 @@ class ProfileMergeServiceTest {
     extraction.setStrengths(List.of(strength));
     extraction.setWeaknesses(List.of(weakness));
     extraction.setMemory(memory);
+    doThrow(new RuntimeException("fallback old format"))
+        .when(jsonParseService).parseProfileUpdatePatch(anyString());
 
     ProfileMergeService service = new ProfileMergeService(
         memoryProfileJsonMapper,
         userProfileMapper,
-        objectMapper);
+        objectMapper,
+        jsonParseService);
 
     String mergedProfileJson = service.mergeAndSave(1L, extraction);
     JsonNode merged = objectMapper.readTree(mergedProfileJson);

@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @RestController
 @RequestMapping("/api/interview")
@@ -25,19 +26,18 @@ public class InterviewController {
 
         @PostMapping("/start")
         @Operation(summary = "启动模拟面试")
-        public Result<InterviewReplyDTO> startInterview(
+        public SseEmitter startInterview(
                         @RequestParam Long userId,
                         @RequestParam String interviewType,
                         @RequestParam String targetRole,
                         @RequestParam String topic,
                         @RequestParam(required = false) String projectSummary) {
-                return Result.success(
-                                interviewService.startInterview(
-                                                userId,
-                                                interviewType,
-                                                targetRole,
-                                                topic,
-                                                projectSummary));
+                return interviewService.startInterviewStream(
+                                userId,
+                                interviewType,
+                                targetRole,
+                                topic,
+                                projectSummary);
 
         }
 
@@ -50,17 +50,16 @@ public class InterviewController {
          */
         @PostMapping("/{sessionId}/answer")
         @Operation(summary = "提交用户回答")
-        public Result<InterviewReplyDTO> answerQuestion(
+        public SseEmitter answerQuestion(
                         @PathVariable Long sessionId,
                         @RequestParam Long userId,
                         @RequestParam String topic,
                         @RequestBody String answer) {
-                return Result.success(
-                                interviewService.answerQuestion(
-                                                userId,
-                                                sessionId,
-                                                topic,
-                                                answer));
+                return interviewService.answerQuestionStream(
+                                userId,
+                                sessionId,
+                                topic,
+                                answer);
         }
 
         /**
@@ -93,5 +92,11 @@ public class InterviewController {
                         @RequestBody String answer) {
                 return Result.success(
                                 interviewService.handleAnswer(userId, topic, answer));
+        }
+
+        @PostMapping("/{sessionId}/stop")
+        public Result<String> stopStream(@PathVariable Long sessionId, @RequestParam Long userId) {
+                interviewService.stopStream(userId, sessionId);
+                return Result.success("stopped");
         }
 }

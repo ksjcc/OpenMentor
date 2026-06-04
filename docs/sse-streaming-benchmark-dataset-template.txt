@@ -1,0 +1,341 @@
+SSE 流式交互 Benchmark 数据模板说明
+日期：2026-06-03
+
+一、结论
+
+基于当前仓库 `src/main/resources` 下的现有数据，暂时不能直接、可信地测出以下两个指标：
+
+1. 首 Token 返回时间（TTFT）控制在 [XXms]
+2. 打断响应延迟控制在 [XXms]
+
+原因有两层：
+
+1. 代码层当前尚未形成真正的 SSE 流式链路
+- `src/main/java/com/controller/InterviewController.java` 目前是同步 `POST` 返回 JSON
+- `src/main/java/com/ai/client/LlmClient.java` 目前调用的是阻塞式 `chatModel.generate(message)`
+- 当前未发现 `SseEmitter`、`text/event-stream`、`ServerSentEvent`、流式回调、客户端取消确认事件等实现
+
+2. 现有 `resources` 数据是离线 benchmark 数据，不是流式时延日志
+- 已有数据可支撑 token、时长、fallback、runtime trace 等离线统计
+- 但不包含 “请求发起时间 -> 首个 token 推出时间” 以及 “用户中断时间 -> 服务端确认停止推流时间” 这两个指标所需的关键事件字段
+
+
+二、现有数据为什么不够
+
+当前已有数据目录主要包括：
+
+1. `src/main/resources/data/runtime/`
+- 更适合测：总耗时、token 消耗、fallback、request success、quality score
+- 不适合测：TTFT、流式 chunk 间隔、取消响应延迟
+
+2. `src/main/resources/data/trace/`
+- 更适合测：trace 阶段定位、故障归因、fallback 触发判断
+- 不适合测：真实流式首包时延、打断停止时延
+
+TTFT 至少需要这些原始时间点：
+
+1. `request_sent_at`
+2. `server_received_at`
+3. `first_token_sent_at`
+4. `first_token_received_at`
+
+打断响应延迟至少需要这些原始时间点：
+
+1. `interrupt_sent_at`
+2. `interrupt_received_at`
+3. `generation_stopped_at`
+4. `stream_closed_at`
+5. `last_chunk_received_at`
+
+当前现有 `jsonl/csv` 中并没有这些字段，所以不能直接给出可信的 TTFT 和打断延迟结果。
+
+
+三、如果要测这两个指标，需要哪些文件
+
+建议新增目录：
+
+`src/main/resources/data/sse_streaming/`
+
+目录下至少包含以下 4 个文件：
+
+1. `sse_streaming_cases.jsonl`
+2. `sse_streaming_interrupt_cases.jsonl`
+3. `sse_streaming_event_log.csv`
+4. `sse_streaming_summary_targets.json`
+
+
+四、文件一：sse_streaming_cases.jsonl
+
+作用：
+
+1. 定义正常流式问答样本
+2. 用于测 TTFT、整体流式时长、chunk 输出稳定性
+
+每行一个 JSON 对象，推荐字段如下：
+
+{
+  "case_id": "sse_case_001",
+  "scene": "AI_INTERVIEW_START",
+  "question": "请解释 Redis 缓存与数据库双写一致性问题",
+  "answer_context": "候选人提到了缓存更新，但没有覆盖延迟双删、旁路缓存与补偿机制",
+  "resume_text": "三年 Java 后端经验，做过订单系统和缓存优化",
+  "project_summary": "负责高并发交易链路、Redis 热点数据治理、MQ 异步削峰",
+  "history_summary": "历史回答中 Redis 一致性与异常恢复讲解不完整",
+  "expected_min_output_chars": 120,
+  "expected_output_type": "FOLLOW_UP_QUESTION",
+  "network_profile": "LOCAL_STABLE",
+  "notes": "用于测首 Token 返回时间"
+}
+
+字段要求：
+
+1. `case_id`
+- 全局唯一
+- 推荐格式：`sse_case_001`
+
+2. `scene`
+- 推荐枚举：
+- `AI_INTERVIEW_START`
+- `AI_INTERVIEW_ANSWER`
+- `KNOWLEDGE_QA`
+- `FOLLOW_UP_QUESTION`
+- `LEARNING_RECOMMENDATION`
+
+3. 上下文字段
+- 要尽量贴近真实 Prompt 输入
+- 至少包含 question、answer_context、resume_text、project_summary、history_summary 中的 3 项
+- 否则 TTFT 的测试数据量级与真实线上上下文不一致
+
+
+五、文件二：sse_streaming_interrupt_cases.jsonl
+
+作用：
+
+1. 定义需要执行“用户打断”的样本
+2. 用于测取消响应延迟、取消后残留 token 数、流是否及时关闭
+
+每行一个 JSON 对象，推荐字段如下：
+
+{
+  "interrupt_case_id": "sse_interrupt_001",
+  "linked_case_id": "sse_case_001",
+  "interrupt_strategy": "AFTER_FIRST_TOKEN",
+  "interrupt_trigger_ms": 0,
+  "max_allowed_post_interrupt_chunks": 1,
+  "expected_stream_close_ms": 200,
+  "notes": "在首 token 到达后立即打断"
+}
+
+推荐打断策略覆盖：
+
+1. `AFTER_FIRST_TOKEN`
+2. `AFTER_300MS`
+3. `AFTER_1S`
+4. `AFTER_30_PERCENT_OUTPUT`
+5. `AFTER_60_PERCENT_OUTPUT`
+
+
+六、文件三：sse_streaming_event_log.csv
+
+作用：
+
+1. 这是最关键的原始日志文件
+2. TTFT 和打断延迟都从这里计算
+
+建议表头如下：
+
+run_id,case_id,phase,event_seq,event_type,client_request_id,request_sent_at,server_received_at,model_request_sent_at,first_token_sent_at,first_token_received_at,chunk_sent_at,chunk_received_at,interrupt_sent_at,interrupt_received_at,generation_stopped_at,stream_closed_at,last_chunk_received_at,chunk_index,chunk_chars,chunk_tokens_est,model_name,transport,status_code,error_type,notes
+
+字段解释：
+
+1. `phase`
+- 取值建议：
+- `NORMAL_STREAM`
+- `INTERRUPT_STREAM`
+
+2. `event_type`
+- 推荐事件：
+- `REQUEST_SENT`
+- `SERVER_RECEIVED`
+- `MODEL_REQUEST_SENT`
+- `FIRST_TOKEN_SENT`
+- `FIRST_TOKEN_RECEIVED`
+- `CHUNK_SENT`
+- `CHUNK_RECEIVED`
+- `INTERRUPT_SENT`
+- `INTERRUPT_RECEIVED`
+- `GENERATION_STOPPED`
+- `STREAM_CLOSED`
+
+3. 时间字段
+- 统一使用 ISO-8601，精确到毫秒
+- 示例：`2026-06-03T14:23:15.127+08:00`
+
+4. `chunk_index`
+- 首个 chunk 从 1 开始
+
+5. `chunk_tokens_est`
+- 可以先用估算值
+- 但 TTFT 的判断优先依赖时间戳，不依赖 token 估算
+
+示例行：
+
+run_001,sse_case_001,NORMAL_STREAM,1,REQUEST_SENT,req_001,2026-06-03T14:00:00.000+08:00,,,,,,,,,,,,,0,0,0,qwen-plus,SSE,200,,client send
+run_001,sse_case_001,NORMAL_STREAM,2,SERVER_RECEIVED,req_001,2026-06-03T14:00:00.000+08:00,2026-06-03T14:00:00.011+08:00,,,,,,,,,,,,0,0,0,qwen-plus,SSE,200,,server accepted
+run_001,sse_case_001,NORMAL_STREAM,3,FIRST_TOKEN_SENT,req_001,2026-06-03T14:00:00.000+08:00,2026-06-03T14:00:00.011+08:00,2026-06-03T14:00:00.029+08:00,2026-06-03T14:00:00.412+08:00,,,,,,,,,,1,6,2,qwen-plus,SSE,200,,first token out
+run_001,sse_case_001,NORMAL_STREAM,4,FIRST_TOKEN_RECEIVED,req_001,2026-06-03T14:00:00.000+08:00,2026-06-03T14:00:00.011+08:00,2026-06-03T14:00:00.029+08:00,2026-06-03T14:00:00.412+08:00,2026-06-03T14:00:00.428+08:00,,,,,,,,,1,6,2,qwen-plus,SSE,200,,client got first token
+run_002,sse_case_001,INTERRUPT_STREAM,8,INTERRUPT_SENT,req_002,2026-06-03T14:05:00.000+08:00,2026-06-03T14:05:00.013+08:00,2026-06-03T14:05:00.032+08:00,2026-06-03T14:05:00.401+08:00,2026-06-03T14:05:00.419+08:00,,,2026-06-03T14:05:00.430+08:00,,,,,,,qwen-plus,SSE,200,,interrupt send
+run_002,sse_case_001,INTERRUPT_STREAM,9,GENERATION_STOPPED,req_002,2026-06-03T14:05:00.000+08:00,2026-06-03T14:05:00.013+08:00,2026-06-03T14:05:00.032+08:00,2026-06-03T14:05:00.401+08:00,2026-06-03T14:05:00.419+08:00,,,,2026-06-03T14:05:00.452+08:00,,,qwen-plus,SSE,200,,model stop
+run_002,sse_case_001,INTERRUPT_STREAM,10,STREAM_CLOSED,req_002,2026-06-03T14:05:00.000+08:00,2026-06-03T14:05:00.013+08:00,2026-06-03T14:05:00.032+08:00,2026-06-03T14:05:00.401+08:00,2026-06-03T14:05:00.419+08:00,,,,,2026-06-03T14:05:00.468+08:00,2026-06-03T14:05:00.470+08:00,,qwen-plus,SSE,200,,stream closed
+
+
+七、文件四：sse_streaming_summary_targets.json
+
+作用：
+
+1. 声明本轮压测目标
+2. 统一验收口径
+
+推荐内容：
+
+{
+  "benchmark_name": "sse_streaming_benchmark",
+  "ttft_target_ms": 800,
+  "interrupt_latency_target_ms": 200,
+  "p50_ttft_target_ms": 600,
+  "p95_ttft_target_ms": 900,
+  "p95_interrupt_latency_target_ms": 250,
+  "max_post_interrupt_chunks": 1,
+  "required_success_rate": 0.95,
+  "notes": "面向本地开发机和局域网环境"
+}
+
+
+八、指标怎么计算
+
+1. 首 Token 返回时间 TTFT
+
+服务端口径：
+
+`ttft_server_ms = first_token_sent_at - server_received_at`
+
+客户端口径：
+
+`ttft_client_ms = first_token_received_at - request_sent_at`
+
+简历里建议优先写客户端口径，因为更接近用户真实感知。
+
+2. 打断响应延迟
+
+服务端停止口径：
+
+`interrupt_stop_ms = generation_stopped_at - interrupt_received_at`
+
+客户端感知口径：
+
+`interrupt_close_ms = last_chunk_received_at - interrupt_sent_at`
+
+如果没有 `last_chunk_received_at`，则退化使用：
+
+`interrupt_close_ms = stream_closed_at - interrupt_sent_at`
+
+简历里建议优先写客户端感知口径，因为它代表“用户点击停止后多久真正停下来”。
+
+3. 建议输出的统计结果
+
+至少输出：
+
+1. `avg_ttft_client_ms`
+2. `p50_ttft_client_ms`
+3. `p95_ttft_client_ms`
+4. `best_ttft_client_ms`
+5. `avg_interrupt_close_ms`
+6. `p50_interrupt_close_ms`
+7. `p95_interrupt_close_ms`
+8. `best_interrupt_close_ms`
+9. `interrupt_success_rate`
+10. `post_interrupt_extra_chunks_avg`
+
+
+九、最少需要多少数据
+
+1. 最小可演示版
+- `sse_streaming_cases.jsonl`：30 条
+- `sse_streaming_interrupt_cases.jsonl`：15 条
+- 正常流式 run：每条 case 至少执行 3 次，共 90 次
+- 打断流式 run：每条 interrupt case 至少执行 5 次，共 75 次
+- 适合课程设计、项目答辩、简历证明
+
+2. 推荐答辩版
+- `sse_streaming_cases.jsonl`：50 条
+- `sse_streaming_interrupt_cases.jsonl`：25 条
+- 正常流式 run：150 次
+- 打断流式 run：125 次
+- 能较稳定地产出平均值、P50、P95
+
+3. 更可信的工程版
+- `sse_streaming_cases.jsonl`：100 条
+- `sse_streaming_interrupt_cases.jsonl`：40 条
+- 正常流式 run：300 次以上
+- 打断流式 run：200 次以上
+- 可按不同 topic、上下文长度、网络情况分层统计
+
+
+十、样本设计建议
+
+为了让结果更像真实系统，建议覆盖以下维度：
+
+1. 场景维度
+- 面试开场
+- 回答后追问
+- 知识问答
+- 学习建议
+
+2. 上下文长度维度
+- `SHORT`
+- `MEDIUM`
+- `LONG`
+- `EXTRA_LONG`
+
+3. 打断时机维度
+- 首 token 后立即打断
+- 输出 300ms 后打断
+- 输出 1s 后打断
+- 输出中段打断
+
+4. 网络环境维度
+- `LOCAL_STABLE`
+- `LOCAL_BUSY`
+- `WIFI_STABLE`
+
+
+十一、如果后续要真的跑测试，代码侧还需要补什么
+
+至少需要补以下能力：
+
+1. 服务端 SSE 接口
+- Spring MVC 可用 `SseEmitter`
+- 或 Spring WebFlux 的 `Flux<ServerSentEvent<?>>`
+
+2. 流式模型回调
+- 需要从阻塞式 `ChatLanguageModel` 切到支持 streaming 的模型接口
+
+3. 中断机制
+- 客户端发停止请求
+- 服务端能关联 `client_request_id`
+- 服务端能真正取消模型生成任务，而不只是等待方法自然返回
+
+4. 事件日志埋点
+- 必须记录本文档里的关键时间戳
+- 否则依然没法严谨测 TTFT 和打断延迟
+
+
+十二、最终建议
+
+如果你现在要写项目亮点，当前仓库更适合先保守表达为：
+
+`规划并设计 SSE 流式问答与 AI Interview 交互机制，已完成流式性能指标与测试数据规范，支持后续验证 TTFT 与打断响应延迟。`
+
+等你们真正补完 SSE 接口、流式模型、取消链路和事件埋点后，再把它升级为：
+
+`基于 SSE 构建流式问答与 AI Interview 交互机制，TTFT 降至 6xxms，打断响应延迟控制在 1xxms。`

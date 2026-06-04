@@ -20,6 +20,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.ai.Stream.StreamingChunkHandler;
 import com.ai.agent.FollowUpAgent;
 import com.ai.agent.KnowledgeExtractorAgent;
 import com.ai.agent.TechInterviewerAgent;
@@ -102,11 +103,15 @@ class AgentOrchestratorBenchmarkTest {
     @Mock
     private PromptBudgetAllocator promptBudgetAllocator;
 
+    @Mock
+    private StreamingChunkHandler streamingChunkHandler;
+
     private final DecisionAggregator decisionAggregator = new DecisionAggregator();
 
     @BeforeEach
     void setUp() {
         lenient().when(promptBudgetAllocator.compress(any(), any())).thenAnswer(invocation -> invocation.getArgument(0));
+        lenient().when(retrievalBudgetService.createBudget()).thenReturn(new com.service.garphrag.RetrievalBudget());
         lenient().doAnswer(invocation -> {
             Runnable action = invocation.getArgument(2);
             action.run();
@@ -187,7 +192,7 @@ class AgentOrchestratorBenchmarkTest {
         when(memoryDecisionService.decide(anyLong(), anyString())).thenReturn(memoryDecision);
         when(graphDecisionService.decide(anyLong(), anyString())).thenReturn(graphDecision);
         when(promptBuilder.buildQuestionPrompt(any())).thenReturn("next-question-prompt");
-        when(techInterviewerAgent.askQuestion("next-question-prompt")).thenReturn("请解释一下 JVM 内存模型。");
+        when(techInterviewerAgent.streamQuestion(anyString(), anyString(), any())).thenReturn("请解释一下 JVM 内存模型。");
 
         doAnswer(invocation -> {
             com.ai.orchestrator.pipeline.InterviewPipelineContext context = invocation.getArgument(0);
@@ -250,7 +255,8 @@ class AgentOrchestratorBenchmarkTest {
                 "什么是 JVM 内存模型？",
                 "它主要分堆和栈。",
                 "{}",
-                "summary");
+                "summary",
+                streamingChunkHandler);
 
         assertThat(result.getContent()).isEqualTo("请解释一下 JVM 内存模型。");
         assertThat(result.getTotalLatencyMs()).isGreaterThanOrEqualTo(0L);

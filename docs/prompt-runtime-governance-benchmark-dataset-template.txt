@@ -1,0 +1,355 @@
+Prompt Runtime 治理 Benchmark 数据模板说明
+日期：2026-06-02
+
+一、先说结论
+
+基于当前仓库 `src/main/resources` 下已有数据，暂时不能直接、可信地测出下面两个指标：
+
+1. Prompt Token 消耗降低 [XX%]
+2. 服务稳定性控制在 [XX%]
+
+原因不是“完全没有 benchmark 数据”，而是“现有 benchmark 数据不包含这两个指标所必需的原始字段”。
+
+
+二、现有数据为什么不够
+
+当前已有两组主要数据：
+
+1. `src/main/resources/complex/decision_benchmark_run_log.csv`
+- 可测：决策延迟、动作正确率、topic 正确率、routing 正确率、综合决策准确率
+- 不可测：`prompt_tokens`、`completion_tokens`、上下文压缩前后 token、guard/fallback 成功率
+
+2. `src/main/resources/data/trace/runtime_trace_run_log.csv`
+- 可测：trace 排障效率、异常定位效率、fallback 判断正确率
+- 不可测：真实服务成功率、真实请求失败率、fallback 恢复成功率、guard 拦截正确率、Prompt Token 成本
+
+当前缺失的关键原始字段包括：
+
+1. 同一条样本在 `BASELINE` 与 `PROMPT_RUNTIME` 两种模式下的成对 token 消耗记录
+2. `input_tokens` / `output_tokens` / `total_tokens` / `compressed_tokens_saved`
+3. `guard_triggered` / `guard_blocked` / `fallback_triggered` / `fallback_success`
+4. `request_success` / `final_response_available`
+5. 失败原因和恢复路径
+
+所以，现有资源只能支持“部分佐证”，不能严谨产出这两个简历指标。
+
+
+三、如果要测这两个指标，需要哪些文件
+
+建议新增一个目录，例如：
+
+`src/main/resources/data/prompt_runtime/`
+
+目录下至少包含以下 4 个文件：
+
+1. `prompt_runtime_cases.jsonl`
+2. `prompt_runtime_expected_labels.jsonl`
+3. `prompt_runtime_run_log.csv`
+4. `prompt_runtime_fault_cases.jsonl`
+
+
+四、文件一：prompt_runtime_cases.jsonl
+
+作用：
+- 定义每个请求样本本身
+- 用于比较 `BASELINE` 与 `PROMPT_RUNTIME` 在同一输入上的 token 消耗和最终结果
+
+每行一个 JSON 对象，推荐字段如下：
+
+{
+  "case_id": "prompt_case_001",
+  "case_name": "长上下文追问场景",
+  "scenario": "INTERVIEW_FOLLOWUP",
+  "difficulty": "MEDIUM",
+  "context_size": "LONG",
+  "question": "请解释 Redis 缓存一致性问题",
+  "answer": "候选人只回答了双写不一致，但没有讲延迟双删、旁路缓存和补偿机制",
+  "resume_text": "做过订单系统、缓存优化、异步链路改造",
+  "project_summary": "负责过高并发订单系统和 Redis 相关优化",
+  "history_summary": "历史上 Redis 一致性问题多次答得不完整",
+  "memory_signals": [
+    "长期记忆显示该主题掌握不稳定",
+    "最近一次复盘仍标记为弱项"
+  ],
+  "graph_signals": [
+    "Redis 与 MySQL、MQ、系统设计存在多跳关联"
+  ],
+  "retrieval_candidates": [
+    "Redis 一致性治理方案",
+    "缓存旁路模式总结"
+  ],
+  "expected_output_type": "FOLLOW_UP_QUESTION",
+  "notes": "用于比较上下文压缩与预算控制前后 token 消耗"
+}
+
+字段要求：
+
+1. `case_id`
+- 全局唯一
+- 推荐格式：`prompt_case_001`
+
+2. `scenario`
+- 推荐枚举：
+- `INTERVIEW_FOLLOWUP`
+- `NEXT_QUESTION`
+- `KNOWLEDGE_QA`
+- `REVIEW_PLAN`
+- `LEARNING_RECOMMENDATION`
+
+3. `context_size`
+- 推荐枚举：
+- `SHORT`
+- `MEDIUM`
+- `LONG`
+- `EXTRA_LONG`
+
+4. 上下文字段
+- 至少要包含会真正进入 Prompt 的内容
+- 不能只保留题目和答案，否则测不出 Context Priority / Prompt Budget / Compression 的效果
+
+
+五、文件二：prompt_runtime_expected_labels.jsonl
+
+作用：
+- 定义该样本在业务上期望得到的可接受输出
+- 防止 Runtime 虽然省 token，但把质量省没了
+
+每行一个 JSON 对象，推荐字段如下：
+
+{
+  "case_id": "prompt_case_001",
+  "expected_action": "FOLLOW_UP",
+  "expected_topic": "Redis缓存一致性",
+  "must_include_keywords": [
+    "延迟双删",
+    "旁路缓存"
+  ],
+  "allow_fallback": true,
+  "minimum_quality_score": 0.75
+}
+
+
+六、文件三：prompt_runtime_run_log.csv
+
+作用：
+- 这是最关键的文件
+- 最终两个指标都主要从这里计算
+
+建议表头如下：
+
+run_id,case_id,test_mode,start_time,end_time,duration_ms,model_name,input_tokens,output_tokens,total_tokens,raw_context_tokens,compressed_context_tokens,tokens_saved_by_compression,compression_ratio,context_priority_applied,prompt_budget_limit,prompt_budget_hit,guard_triggered,guard_blocked,fallback_triggered,fallback_strategy,fallback_success,request_success,final_response_available,quality_score,is_correct_action,is_correct_topic,error_type,notes
+
+字段解释：
+
+1. `test_mode`
+- 必填
+- 只能取：
+- `BASELINE`
+- `PROMPT_RUNTIME`
+
+2. token 相关字段
+- `input_tokens`：发送给模型的 prompt token
+- `output_tokens`：模型返回 token
+- `total_tokens`：总 token
+- `raw_context_tokens`：压缩前上下文 token
+- `compressed_context_tokens`：压缩后上下文 token
+- `tokens_saved_by_compression`：`raw_context_tokens - compressed_context_tokens`
+- `compression_ratio`：`compressed_context_tokens / raw_context_tokens`
+
+3. Runtime 治理相关字段
+- `context_priority_applied`：是否启用上下文优先级裁剪
+- `prompt_budget_limit`：本次预算上限
+- `prompt_budget_hit`：是否触发预算约束
+
+4. 稳定性相关字段
+- `guard_triggered`：Output Guard 是否触发
+- `guard_blocked`：Guard 是否真的阻断了风险输出
+- `fallback_triggered`：是否进入 fallback
+- `fallback_strategy`：例如 `RULE_TEMPLATE`、`SAFE_DEFAULT`、`RETRY_ONCE`
+- `fallback_success`：fallback 后是否成功产出可交付结果
+- `request_success`：整个请求是否成功
+- `final_response_available`：最终是否返回了可用响应
+
+示例行：
+
+run_baseline_001,prompt_case_001,BASELINE,2026-06-02T10:01:00,2026-06-02T10:01:01.320,1320,qwen-plus,1820,210,2030,1450,1450,0,1.0,False,2200,False,False,False,False,,False,True,True,0.82,True,True,,baseline run
+run_runtime_001,prompt_case_001,PROMPT_RUNTIME,2026-06-02T10:01:00,2026-06-02T10:01:01.090,1090,qwen-plus,1210,205,1415,1450,830,620,0.5724,True,2200,True,False,False,False,,False,True,True,0.81,True,True,,runtime run
+
+
+七、文件四：prompt_runtime_fault_cases.jsonl
+
+作用：
+- 专门评估稳定性，不和普通样本混在一起
+- 用于覆盖 Guard、Fallback、超时、空输出、非法 JSON、检索失败、上下文缺失等异常
+
+每行一个 JSON 对象，推荐字段如下：
+
+{
+  "fault_case_id": "runtime_fault_001",
+  "linked_case_id": "prompt_case_001",
+  "pipeline_stage": "GENERATION",
+  "fault_type": "EMPTY_OUTPUT",
+  "fault_injection_point": "FollowUpAgent",
+  "expected_guard_behavior": "识别空输出并进入安全兜底",
+  "expected_fallback_strategy": "SAFE_DEFAULT",
+  "expected_final_response_available": true
+}
+
+推荐故障类型覆盖：
+
+1. `TIMEOUT`
+2. `EMPTY_OUTPUT`
+3. `INVALID_JSON`
+4. `CONTEXT_MISSING`
+5. `RETRIEVAL_EMPTY`
+6. `RETRIEVAL_TIMEOUT`
+7. `MODEL_ERROR`
+8. `GUARD_BLOCK`
+
+
+八、指标怎么计算
+
+1. Prompt Token 消耗降低 [XX%]
+
+推荐公式：
+
+`token_reduction_rate = (avg(total_tokens_baseline) - avg(total_tokens_runtime)) / avg(total_tokens_baseline)`
+
+更建议主打两层指标：
+
+1. `Prompt 输入 Token 降低率`
+- `input_token_reduction = (avg(input_tokens_baseline) - avg(input_tokens_runtime)) / avg(input_tokens_baseline)`
+
+2. `总 Token 降低率`
+- `total_token_reduction = (avg(total_tokens_baseline) - avg(total_tokens_runtime)) / avg(total_tokens_baseline)`
+
+简历里更建议写：
+- “Prompt Token 消耗降低 28.4%”
+或
+- “平均输入 Token 消耗降低 31.7%，总 Token 消耗降低 24.9%”
+
+2. 服务稳定性控制在 [XX%]
+
+推荐主指标：
+
+`service_stability = request_success_count / total_request_count`
+
+如果你想更贴近 Runtime 治理价值，建议再补两个副指标：
+
+1. `final_response_availability`
+- `final_response_available_count / total_request_count`
+- 表示即使主链路失败，最终仍有可用响应的比例
+
+2. `fallback_recovery_rate`
+- `fallback_success_count / fallback_triggered_count`
+- 表示 fallback 真正把多少失败请求救回来了
+
+简历里更建议写：
+- “服务可用响应率稳定在 97.5%”
+或
+- “异常场景下 fallback 恢复成功率 88.2%，最终请求可用率 96.8%”
+
+
+九、最少需要多少数据
+
+1. 最小可演示版
+- `prompt_runtime_cases.jsonl`：30 条
+- `prompt_runtime_expected_labels.jsonl`：30 条
+- `prompt_runtime_run_log.csv`：60 行
+- 说明：每条 case 需要 2 行，对应 `BASELINE` 和 `PROMPT_RUNTIME`
+- `prompt_runtime_fault_cases.jsonl`：12 条
+
+2. 推荐离线 benchmark 版
+- `prompt_runtime_cases.jsonl`：80 到 120 条
+- `prompt_runtime_expected_labels.jsonl`：与 case 一一对应
+- `prompt_runtime_run_log.csv`：160 到 240 行
+- `prompt_runtime_fault_cases.jsonl`：24 到 40 条
+
+3. 更有说服力的正式版
+- 普通 case：150 到 300 条
+- fault case：40 到 80 条
+- 保证不同 `scenario`、不同 `context_size`、不同失败类型分布均衡
+
+
+十、样本分布建议
+
+普通 case 推荐分布：
+
+1. `SHORT`：20%
+2. `MEDIUM`：30%
+3. `LONG`：35%
+4. `EXTRA_LONG`：15%
+
+场景推荐分布：
+
+1. `INTERVIEW_FOLLOWUP`：40%
+2. `NEXT_QUESTION`：20%
+3. `KNOWLEDGE_QA`：20%
+4. `REVIEW_PLAN`：10%
+5. `LEARNING_RECOMMENDATION`：10%
+
+fault case 推荐分布：
+
+1. LLM 输出异常：30%
+2. 超时类：20%
+3. 检索类失败：20%
+4. Prompt 组装缺失：15%
+5. Guard 拦截类：15%
+
+
+十一、数据采集要求
+
+1. 同一条 case 必须在同一模型、同一环境下分别跑 `BASELINE` 和 `PROMPT_RUNTIME`
+2. 不能只记录最终均值，必须保留请求级明细
+3. 必须记录真实 token 使用量，不能只估算字符长度
+4. 若使用 OpenAI、通义、DeepSeek 或其他模型 API，优先直接读取响应中的 usage 字段
+5. 如果当前 LLM Client 没有落日志，需要先在调用层补充 token、guard、fallback、success 状态埋点
+
+
+十二、建议先补的埋点
+
+如果你准备后面真正跑这个 benchmark，代码层最先要补的是以下请求级埋点：
+
+1. `case_id`
+2. `test_mode`
+3. `model_name`
+4. `input_tokens`
+5. `output_tokens`
+6. `total_tokens`
+7. `raw_context_tokens`
+8. `compressed_context_tokens`
+9. `tokens_saved_by_compression`
+10. `guard_triggered`
+11. `fallback_triggered`
+12. `fallback_success`
+13. `request_success`
+14. `final_response_available`
+15. `duration_ms`
+
+
+十三、当前项目可直接引用的部分结果
+
+虽然现在不能直接得到你要的两个目标指标，但当前仓库已有数据可以辅助证明另外两类收益：
+
+1. `runtime_trace_run_log.csv`
+- `BASIC_LOG` 平均耗时约 205.0 秒
+- `TRACE_ONLY` 平均耗时约 107.5 秒
+- 可表述为：异常排障效率提升约 47.6%
+
+2. `decision_benchmark_run_log.csv`
+- `BASELINE` 平均延迟约 1202.62 ms
+- `MULTI_AGENT` 平均延迟约 710.60 ms
+- 可表述为：复杂决策链路处理时延下降约 40.9%
+
+这些结果能作为你项目“多阶段 runtime 优化”的旁证，但不能替代 `Prompt Token 降低率` 和 `服务稳定性` 这两个指标。
+
+
+十四、最后结论
+
+当前 `src/main/resources` 的现有数据：
+
+1. 不能直接严谨测出 `Prompt Token 消耗降低 [XX%]`
+2. 不能直接严谨测出 `服务稳定性控制在 [XX%]`
+3. 可以支撑“延迟优化”和“trace 排障效率提升”类指标
+
+如果后续补齐本模板要求的 4 份数据与请求级埋点，就可以正式计算这两个简历亮点指标。

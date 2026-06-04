@@ -7,6 +7,8 @@ import com.ai.prompt.PromptActionType;
 import com.ai.prompt.PromptBudgetAllocator;
 import com.ai.prompt.PromptContext;
 import com.ai.prompt.PromptTemplates;
+import com.ai.runtime.PromptRuntimeMetrics;
+import com.ai.runtime.PromptRuntimeTracker;
 import com.dto.decision.FinalDecisionDTO;
 import com.entity.Trace.TraceEvent;
 import com.service.cache.InterviewMemoryCacheService;
@@ -46,9 +48,12 @@ public class PromptAssemblyStage {
         .task(resolveTask(finalDecision))
         .graphReasoning(finalDecision.getReason())
         .build();
+    PromptActionType promptAction = PromptActionType.fromTask(promptContext.getTask());
     PromptContext compressed = promptBudgetAllocator.compress(
         promptContext,
-        PromptActionType.fromTask(promptContext.getTask()));
+        promptAction);
+    PromptRuntimeTracker.recordCompression(promptContext, compressed, promptAction);
+    PromptRuntimeMetrics runtimeMetrics = PromptRuntimeTracker.snapshot();
 
     context.setPromptContext(compressed);
 
@@ -73,6 +78,14 @@ public class PromptAssemblyStage {
             entry("compressedRagContextCount",
                 compressed.getRagMemories() == null ? 0 : compressed.getRagMemories().size()),
             entry("graphContextCount", context.getGraphRagContext() == null ? 0 : context.getGraphRagContext().size()),
+            entry("rawContextChars", runtimeMetrics.getRawContextChars()),
+            entry("compressedContextChars", runtimeMetrics.getCompressedContextChars()),
+            entry("estimatedRawContextTokens", runtimeMetrics.getEstimatedRawContextTokens()),
+            entry("estimatedCompressedContextTokens", runtimeMetrics.getEstimatedCompressedContextTokens()),
+            entry("estimatedContextTokensSaved", runtimeMetrics.getEstimatedContextTokensSaved()),
+            entry("compressionRatio", runtimeMetrics.getCompressionRatio()),
+            entry("promptBudgetApplied", runtimeMetrics.isPromptBudgetApplied()),
+            entry("tokenEstimationMethod", runtimeMetrics.getTokenEstimationMethod()),
             entry("hasProfile", profileJson != null && !profileJson.isBlank()),
             entry("hasSummary", summaryMd != null && !summaryMd.isBlank()),
             entry("promptTask", promptContext.getTask() == null ? "" : promptContext.getTask()),

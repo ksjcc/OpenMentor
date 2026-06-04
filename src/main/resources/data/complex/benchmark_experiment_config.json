@@ -1,0 +1,22 @@
+{
+  "benchmark_name": "multi_agent_decision_benchmark_v1",
+  "baseline_mode": {
+    "name": "single_path_decision",
+    "description": "仅使用DifficultyPolicy或串行弱决策"
+  },
+  "experiment_mode": {
+    "name": "multi_agent_collaborative_decision",
+    "description": "启用Memory/Graph并行推理、融合与动态路由"
+  },
+  "metrics": [
+    "avg_latency_ms",
+    "decision_accuracy",
+    "action_accuracy",
+    "topic_accuracy",
+    "routing_accuracy"
+  ],
+  "latency_measurement_rule": "从输入到输出动作结束计时",
+  "accuracy_measurement_rule": "按标准标签评分",
+  "random_seed": 42,
+  "notes": "同环境运行baseline与experiment"
+}

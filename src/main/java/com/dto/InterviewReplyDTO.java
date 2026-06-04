@@ -2,6 +2,8 @@ package com.dto;
 
 import java.util.Map;
 
+import com.ai.runtime.PromptRuntimeMetrics;
+
 import lombok.Data;
 
 /**
@@ -21,5 +23,6 @@ public class InterviewReplyDTO {
   private String scoreJson;
   private Map<String, Long> stageLatencyMs;
   private Long totalLatencyMs;
+  private PromptRuntimeMetrics promptRuntimeMetrics;
 
 }

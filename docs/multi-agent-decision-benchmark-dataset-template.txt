@@ -1,0 +1,465 @@
+Multi-Agent 协同决策评测数据集模板
+适用项目：AgentCareer
+整理日期：2026-06-02
+
+一、文档目的
+
+本模板用于为 AgentCareer 项目的以下两项指标准备测试数据与测试方案：
+
+1. 复杂任务处理效率提升 [XX%]
+2. 决策准确率提升 [XX%]
+
+这两项指标的核心不是单纯比较模型回答是否流畅，而是比较：
+- 单路径或弱协同决策模式
+- 多 Agent 并行推理 + 决策融合 + 动态路由 + 共享上下文模式
+
+在复杂任务下，哪一种方式更快、更稳、更接近人工标注的正确决策。
+
+
+二、是否需要新的测试数据集
+
+结论：
+- 需要
+
+原因：
+- 现有 Runtime-Trace 数据集主要用于测排障效率和异常定位效率，不适合直接测多 Agent 决策质量。
+- 现有 AgentOrchestratorBenchmarkTest 主要是 Mockito + Thread.sleep 的合成 benchmark，只能证明并行执行链路成立，不能直接产出可写进简历的真实业务指标。
+- 如果要严谨测出 “复杂任务处理效率提升 XX%” 和 “决策准确率提升 XX%”，需要专门构造一套复杂任务决策评测集。
+
+换句话说，这里的“数据集”不是知识库语料，而是：
+- 一组复杂任务样本
+- 每个样本的标准决策标签
+- baseline 与 multi-agent 的运行记录
+- 用于统计效率和准确率的对照实验表
+
+
+三、建议的数据集文件组成
+
+建议至少准备以下四类文件：
+
+1. complex_task_cases.jsonl
+- 复杂任务样本集
+
+2. expected_decision_labels.jsonl
+- 每个样本的标准答案与判分依据
+
+3. benchmark_experiment_config.json
+- 对照实验配置
+
+4. decision_benchmark_run_log.csv
+- 实际跑分记录表
+
+
+四、文件一：complex_task_cases.jsonl
+
+作用：
+- 定义“要测哪些复杂任务”
+- 作为 baseline 与 multi-agent 两种模式的共同输入
+
+每一行表示一个复杂任务样本。
+
+字段模板如下：
+
+{
+  "case_id": "decision_case_001",
+  "case_name": "候选人对 Redis 缓存一致性回答不完整，需要判断是否追问",
+  "scenario": "INTERVIEW_FOLLOWUP",
+  "difficulty": "MEDIUM",
+  "task_complexity": "MULTI_SIGNAL",
+  "target_role": "Java后端开发",
+  "topic": "Redis",
+  "question": "为什么 Redis 缓存一致性难做？",
+  "answer": "数据库和缓存更新顺序可能有问题，但我不太清楚延迟双删和订阅 binlog 的差别。",
+  "weak_topic_hint": "Redis缓存一致性",
+  "resume_text": "负责订单系统、缓存优化、异步链路改造。",
+  "project_summary": "做过高并发订单系统，引入 Redis 与 MQ 做缓存和削峰。",
+  "history_summary": "上一轮面试中，候选人在缓存穿透和缓存雪崩上表现一般。",
+  "memory_signals": [
+    "长期记忆显示候选人在 Redis 一致性、淘汰策略上掌握薄弱",
+    "用户最近三次复习计划中多次标记 Redis 为薄弱点"
+  ],
+  "graph_signals": [
+    "图谱中 Redis 一致性与 MySQL、binlog、MQ、延迟双删形成多跳关系",
+    "该问题适合追问方案对比与工程取舍"
+  ],
+  "retrieval_candidates": [
+    "缓存一致性常见方案：延迟双删、旁路缓存、binlog 异步更新",
+    "高并发系统中 Redis 与 MySQL 双写一致性治理案例"
+  ],
+  "expected_challenge": "需要综合回答质量、历史薄弱点与知识图谱关系判断是否继续追问",
+  "notes": "用于测试多源信号融合能力"
+}
+
+字段说明：
+
+1. case_id
+- 样本唯一 ID
+
+2. case_name
+- 便于人工理解的样本名称
+
+3. scenario
+- 任务场景
+- 推荐值：
+  INTERVIEW_FOLLOWUP
+  NEXT_QUESTION_SELECTION
+  HARDER_QUESTION_ESCALATION
+  LEARNING_RECOMMENDATION
+  MIXED_RETRIEVAL_DECISION
+
+4. difficulty
+- 推荐值：
+  EASY
+  MEDIUM
+  HARD
+
+5. task_complexity
+- 用于体现“复杂任务”的复杂来源
+- 推荐值：
+  SINGLE_SIGNAL
+  MULTI_SIGNAL
+  MULTI_HOP
+  CONFLICTING_SIGNAL
+  LONG_CONTEXT
+
+6. target_role / topic / question / answer
+- 任务主输入
+
+7. weak_topic_hint
+- 从评分或人工总结视角给出的薄弱点提示
+
+8. resume_text / project_summary / history_summary
+- 共享上下文信息
+
+9. memory_signals
+- 模拟 Memory Agent 可用的信息
+
+10. graph_signals
+- 模拟 Graph Agent 可用的信息
+
+11. retrieval_candidates
+- 可选证据片段，便于后续检索链路一并评测
+
+12. expected_challenge
+- 说明该样本为什么复杂
+
+13. notes
+- 备注
+
+
+五、文件二：expected_decision_labels.jsonl
+
+作用：
+- 定义每个复杂任务样本的标准答案
+- 后续用于衡量 multi-agent 是否比 baseline 更准确
+
+字段模板如下：
+
+{
+  "case_id": "decision_case_001",
+  "expected_final_action": "FOLLOW_UP",
+  "expected_topic": "Redis缓存一致性",
+  "expected_reason_keywords": ["回答不完整", "薄弱点", "方案对比", "继续追问"],
+  "expected_need_memory": true,
+  "expected_need_graph": true,
+  "expected_need_vector": true,
+  "expected_primary_retriever": "GRAPH_RAG",
+  "expected_complexity": "MULTI_HOP",
+  "expected_difficulty_signal": "回答未达可放行标准",
+  "judge_rule": "若最终动作为FOLLOW_UP，主题指向Redis缓存一致性，且理由体现回答不完整+历史薄弱点+多跳关系，则判定为正确",
+  "score_rubric": {
+    "action_match": 0.4,
+    "topic_match": 0.2,
+    "reason_match": 0.2,
+    "routing_match": 0.2
+  }
+}
+
+字段说明：
+
+1. expected_final_action
+- 正确最终动作
+- 推荐值：
+  FOLLOW_UP
+  NEXT
+  HARDER
+
+2. expected_topic
+- 正确追问主题或下一题主题
+
+3. expected_reason_keywords
+- 用于判断解释是否覆盖核心理由
+
+4. expected_need_memory / expected_need_graph / expected_need_vector
+- 正确的路由需求标签
+
+5. expected_primary_retriever
+- 正确主检索器
+- 推荐值：
+  MEMORY_RAG
+  VECTOR_RAG
+  GRAPH_RAG
+  HYBRID
+
+6. expected_complexity
+- 该样本应被识别出的复杂度
+- 推荐值：
+  SIMPLE
+  MULTI_HOP
+  GLOBAL
+
+7. expected_difficulty_signal
+- 用于解释为什么做出该动作
+
+8. judge_rule
+- 人工核验标准
+
+9. score_rubric
+- 建议保留，后续可做加权评分
+
+
+六、文件三：benchmark_experiment_config.json
+
+作用：
+- 明确 baseline 与 experiment 的对照方式
+- 防止后续统计口径漂移
+
+建议模板如下：
+
+{
+  "benchmark_name": "multi_agent_decision_benchmark_v1",
+  "baseline_mode": {
+    "name": "single_path_decision",
+    "description": "仅使用DifficultyPolicy或串行弱决策，不启用并行推理、融合和动态路由增强"
+  },
+  "experiment_mode": {
+    "name": "multi_agent_collaborative_decision",
+    "description": "启用Memory/Graph并行推理、DecisionAggregator融合、动态路由与共享上下文"
+  },
+  "metrics": [
+    "avg_latency_ms",
+    "decision_accuracy",
+    "action_accuracy",
+    "topic_accuracy",
+    "routing_accuracy"
+  ],
+  "latency_measurement_rule": "从输入样本送入决策入口开始计时，到产出最终动作与主题结束计时",
+  "accuracy_measurement_rule": "按标准标签对最终动作、主题、理由关键词与路由决策进行评分",
+  "random_seed": 42,
+  "notes": "同一批样本必须在相同环境下分别运行baseline与experiment"
+}
+
+
+七、文件四：decision_benchmark_run_log.csv
+
+作用：
+- 记录每条样本在不同测试模式下的运行结果
+- 作为最终计算效率提升和准确率提升的原始数据
+
+建议表头如下：
+
+run_id,case_id,test_mode,start_time,end_time,duration_ms,predicted_action,predicted_topic,predicted_reason,need_memory,need_graph,need_vector,primary_retriever,predicted_complexity,is_correct_action,is_correct_topic,reason_keyword_hit_count,reason_keyword_total,is_correct_routing,weighted_score,notes
+
+字段说明：
+
+1. test_mode
+- 推荐值：
+  BASELINE
+  MULTI_AGENT
+
+2. duration_ms
+- 该样本从进入决策流程到输出结果的总耗时
+
+3. predicted_action / predicted_topic / predicted_reason
+- 模型实际输出
+
+4. need_memory / need_graph / need_vector / primary_retriever / predicted_complexity
+- 实际路由与复杂度判断结果
+
+5. is_correct_action
+- 最终动作是否正确
+
+6. is_correct_topic
+- 主题是否正确
+
+7. reason_keyword_hit_count / reason_keyword_total
+- 理由命中数，用于近似衡量解释质量
+
+8. is_correct_routing
+- 路由是否正确
+
+9. weighted_score
+- 按 score_rubric 算出的单样本综合得分
+
+
+八、推荐样本数量
+
+如果只是先跑通流程：
+- complex_task_cases.jsonl：30 到 40 条
+- expected_decision_labels.jsonl：与 case 一一对应
+- decision_benchmark_run_log.csv：每条样本至少 2 行，分别对应 BASELINE 和 MULTI_AGENT
+
+如果希望数字初步可写进项目说明：
+- complex_task_cases.jsonl：60 到 80 条
+- 场景尽量覆盖 4 类以上
+- HARD 样本占比建议不低于 30%
+
+如果希望数字更稳、可用于简历或面试材料：
+- complex_task_cases.jsonl：100 到 150 条
+- 每种 scenario 至少 20 条
+- 每种 task_complexity 至少 15 条
+- CONFLICTING_SIGNAL 与 MULTI_HOP 样本合计建议不低于 35%
+
+如果希望形成较有说服力的正式离线 benchmark：
+- complex_task_cases.jsonl：180 到 250 条
+- 建议由你人工抽检至少 20%
+- 有条件的话，至少 2 轮独立标注或复核
+
+
+九、场景覆盖建议
+
+建议至少覆盖以下 5 类复杂任务：
+
+1. 回答不完整但有部分正确点
+- 用于判断是否 FOLLOW_UP
+
+2. 回答很好且可提高难度
+- 用于判断是否 HARDER
+
+3. 回答基本过关但不需要继续深挖
+- 用于判断是否 NEXT
+
+4. 历史记忆与当轮回答信号冲突
+- 用于测试多源冲突融合能力
+
+5. 图谱关系强但表面回答看似正常
+- 用于测试多跳关系发现能力
+
+建议分布：
+- EASY：20%
+- MEDIUM：45%
+- HARD：35%
+
+
+十、准确率指标怎么计算
+
+建议至少统计四个子指标：
+
+1. Action Accuracy
+- 最终动作预测正确率
+
+2. Topic Accuracy
+- 最终主题预测正确率
+
+3. Routing Accuracy
+- memory / graph / vector / primary retriever 选择正确率
+
+4. Weighted Decision Score
+- 按 score_rubric 计算的综合得分
+
+推荐最终“决策准确率”口径：
+
+decision_accuracy =
+0.4 * action_accuracy
++ 0.2 * topic_accuracy
++ 0.2 * reason_quality
++ 0.2 * routing_accuracy
+
+其中：
+- reason_quality = reason_keyword_hit_count / reason_keyword_total 的平均值
+
+如果简历上写“决策准确率提升 XX%”，推荐两个口径二选一：
+
+1. 相对提升：
+- (multi_agent_accuracy - baseline_accuracy) / baseline_accuracy
+
+2. 百分点提升：
+- multi_agent_accuracy - baseline_accuracy
+
+如果 baseline 较高，建议使用“百分点提升”更稳妥。
+
+
+十一、效率指标怎么计算
+
+推荐统计：
+
+1. 平均决策耗时
+- baseline_avg_latency_ms
+- multi_agent_avg_latency_ms
+
+2. 复杂任务处理效率提升
+- efficiency_improvement =
+  (baseline_avg_latency_ms - multi_agent_avg_latency_ms) / baseline_avg_latency_ms
+
+补充建议：
+- 如果 multi-agent 引入更多步骤导致平均耗时略高，但显著提升准确率，也可以补充一个“单位正确决策耗时”指标：
+
+cost_per_correct_decision =
+avg_latency_ms / decision_accuracy
+
+这样可以反映“虽然步骤更多，但每次正确决策所需成本更低”。
+
+
+十二、数据标注要求
+
+建议每条样本至少满足以下要求：
+
+1. 问题必须具体
+- 不要只写“请评价回答”
+
+2. 回答必须保留真实的不确定性
+- 例如部分正确、概念混淆、回答过浅、答非所问
+
+3. 历史记忆信号不要全都和当轮一致
+- 必须包含一部分冲突样本
+
+4. 图谱信号要体现多跳关系
+- 不能只写一个关键词
+
+5. judge_rule 要足够清晰
+- 保证后续人工复核时口径一致
+
+
+十三、给 AI 生成 jsonl 数据集的精炼提示词
+
+下面这段提示词可直接交给另一个 AI，用于按本模板批量生成 jsonl 数据：
+
+你现在要为 AgentCareer 项目生成“多 Agent 协同决策 benchmark”数据集，只输出合法 JSONL，每行一个 JSON 对象，不要输出 markdown、解释或标题。
+
+目标：
+- 生成 complex_task_cases.jsonl
+- 样本用于评测多 Agent 并行推理、决策融合、动态路由、共享上下文是否优于单路径决策
+
+生成要求：
+- 共生成 [N] 条
+- 场景覆盖 INTERVIEW_FOLLOWUP、NEXT_QUESTION_SELECTION、HARDER_QUESTION_ESCALATION、LEARNING_RECOMMENDATION、MIXED_RETRIEVAL_DECISION
+- 难度分布接近 EASY 20%、MEDIUM 45%、HARD 35%
+- task_complexity 覆盖 SINGLE_SIGNAL、MULTI_SIGNAL、MULTI_HOP、CONFLICTING_SIGNAL、LONG_CONTEXT
+- 每条样本必须包含字段：
+  case_id, case_name, scenario, difficulty, task_complexity, target_role, topic, question, answer, weak_topic_hint, resume_text, project_summary, history_summary, memory_signals, graph_signals, retrieval_candidates, expected_challenge, notes
+- 内容必须贴合技术求职/面试/学习场景，主题优先包含 Java、Redis、MySQL、MQ、JVM、Spring、系统设计、缓存一致性、分布式事务、索引优化、消息可靠性
+- answer 必须体现真实候选人的不完整回答特征，不能都写成标准答案
+- memory_signals 与 graph_signals 需要有信息量，不能只写空泛短句
+- 至少 30% 样本要包含冲突信号，即历史记忆与当轮回答表面表现不完全一致
+- 输出内容必须字段齐全、值具体、不可重复、case_id 从 decision_case_001 递增
+
+如果你要生成 expected_decision_labels.jsonl，则保持 case_id 一一对应，并为每条样本输出字段：
+case_id, expected_final_action, expected_topic, expected_reason_keywords, expected_need_memory, expected_need_graph, expected_need_vector, expected_primary_retriever, expected_complexity, expected_difficulty_signal, judge_rule, score_rubric
+
+其中：
+- score_rubric 固定为：
+  {"action_match":0.4,"topic_match":0.2,"reason_match":0.2,"routing_match":0.2}
+- judge_rule 必须能让人工看完后判断“什么情况算对”
+- expected_reason_keywords 建议 3 到 5 个
+
+
+十四、落地建议
+
+如果你下一步就要真正开跑，建议顺序如下：
+
+1. 先生成 40 条 complex_task_cases.jsonl
+2. 再生成一一对应的 expected_decision_labels.jsonl
+3. 先跑一轮 BASELINE 与 MULTI_AGENT 对照
+4. 看指标是否稳定，再扩到 80 到 120 条
+
+这样成本最低，也最容易快速产出第一版可解释结果。

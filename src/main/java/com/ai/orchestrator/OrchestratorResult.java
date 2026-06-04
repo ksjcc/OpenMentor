@@ -4,6 +4,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.ai.runtime.PromptRuntimeMetrics;
 import com.dto.decision.AgentDecisionDTO;
 
 import lombok.Data;
@@ -49,4 +50,10 @@ public class OrchestratorResult {
    * 编排链路总耗时（毫秒）
    */
   private long totalLatencyMs;
+
+  /**
+   * Prompt Runtime 治理埋点。
+   * token 为估算值，便于后续离线 benchmark 对比 baseline/runtime。
+   */
+  private PromptRuntimeMetrics promptRuntimeMetrics;
 }

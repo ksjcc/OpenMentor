@@ -1,0 +1,30 @@
+{"case_id": "prompt_case_001", "expected_action": "FOLLOW_UP", "expected_topic": "Database", "must_include_keywords": ["延迟双删", "消息队列"], "allow_fallback": true, "minimum_quality_score": 0.85}
+{"case_id": "prompt_case_002", "expected_action": "PLAN", "expected_topic": "Redis", "must_include_keywords": ["缓存", "消息队列"], "allow_fallback": true, "minimum_quality_score": 0.76}
+{"case_id": "prompt_case_003", "expected_action": "ASK_NEXT", "expected_topic": "Concurrency", "must_include_keywords": ["事务", "延迟双删"], "allow_fallback": false, "minimum_quality_score": 0.83}
+{"case_id": "prompt_case_004", "expected_action": "PLAN", "expected_topic": "Database", "must_include_keywords": ["索引", "延迟双删"], "allow_fallback": true, "minimum_quality_score": 0.89}
+{"case_id": "prompt_case_005", "expected_action": "FOLLOW_UP", "expected_topic": "System Design", "must_include_keywords": ["缓存", "索引"], "allow_fallback": false, "minimum_quality_score": 0.83}
+{"case_id": "prompt_case_006", "expected_action": "FOLLOW_UP", "expected_topic": "System Design", "must_include_keywords": ["缓存", "一致性"], "allow_fallback": false, "minimum_quality_score": 0.87}
+{"case_id": "prompt_case_007", "expected_action": "ASK_NEXT", "expected_topic": "Redis", "must_include_keywords": ["缓存", "线程池"], "allow_fallback": true, "minimum_quality_score": 0.86}
+{"case_id": "prompt_case_008", "expected_action": "FOLLOW_UP", "expected_topic": "System Design", "must_include_keywords": ["索引", "事务"], "allow_fallback": false, "minimum_quality_score": 0.75}
+{"case_id": "prompt_case_009", "expected_action": "EXPLAIN", "expected_topic": "Redis", "must_include_keywords": ["一致性", "线程池"], "allow_fallback": true, "minimum_quality_score": 0.82}
+{"case_id": "prompt_case_010", "expected_action": "PLAN", "expected_topic": "System Design", "must_include_keywords": ["索引", "线程池"], "allow_fallback": true, "minimum_quality_score": 0.84}
+{"case_id": "prompt_case_011", "expected_action": "FOLLOW_UP", "expected_topic": "Database", "must_include_keywords": ["事务", "索引"], "allow_fallback": true, "minimum_quality_score": 0.76}
+{"case_id": "prompt_case_012", "expected_action": "ASK_NEXT", "expected_topic": "System Design", "must_include_keywords": ["事务", "线程池"], "allow_fallback": false, "minimum_quality_score": 0.75}
+{"case_id": "prompt_case_013", "expected_action": "EXPLAIN", "expected_topic": "Concurrency", "must_include_keywords": ["事务", "一致性"], "allow_fallback": false, "minimum_quality_score": 0.79}
+{"case_id": "prompt_case_014", "expected_action": "FOLLOW_UP", "expected_topic": "Redis", "must_include_keywords": ["消息队列", "缓存"], "allow_fallback": true, "minimum_quality_score": 0.83}
+{"case_id": "prompt_case_015", "expected_action": "FOLLOW_UP", "expected_topic": "System Design", "must_include_keywords": ["事务", "一致性"], "allow_fallback": false, "minimum_quality_score": 0.82}
+{"case_id": "prompt_case_016", "expected_action": "FOLLOW_UP", "expected_topic": "Concurrency", "must_include_keywords": ["消息队列", "索引"], "allow_fallback": false, "minimum_quality_score": 0.74}
+{"case_id": "prompt_case_017", "expected_action": "PLAN", "expected_topic": "Redis", "must_include_keywords": ["线程池", "消息队列"], "allow_fallback": false, "minimum_quality_score": 0.89}
+{"case_id": "prompt_case_018", "expected_action": "EXPLAIN", "expected_topic": "Concurrency", "must_include_keywords": ["一致性", "延迟双删"], "allow_fallback": true, "minimum_quality_score": 0.79}
+{"case_id": "prompt_case_019", "expected_action": "EXPLAIN", "expected_topic": "System Design", "must_include_keywords": ["缓存", "消息队列"], "allow_fallback": false, "minimum_quality_score": 0.88}
+{"case_id": "prompt_case_020", "expected_action": "FOLLOW_UP", "expected_topic": "MQ", "must_include_keywords": ["一致性", "缓存"], "allow_fallback": true, "minimum_quality_score": 0.85}
+{"case_id": "prompt_case_021", "expected_action": "ASK_NEXT", "expected_topic": "System Design", "must_include_keywords": ["一致性", "延迟双删"], "allow_fallback": false, "minimum_quality_score": 0.81}
+{"case_id": "prompt_case_022", "expected_action": "ASK_NEXT", "expected_topic": "Concurrency", "must_include_keywords": ["消息队列", "线程池"], "allow_fallback": true, "minimum_quality_score": 0.85}
+{"case_id": "prompt_case_023", "expected_action": "PLAN", "expected_topic": "Concurrency", "must_include_keywords": ["事务", "缓存"], "allow_fallback": true, "minimum_quality_score": 0.76}
+{"case_id": "prompt_case_024", "expected_action": "ASK_NEXT", "expected_topic": "Concurrency", "must_include_keywords": ["延迟双删", "缓存"], "allow_fallback": true, "minimum_quality_score": 0.85}
+{"case_id": "prompt_case_025", "expected_action": "FOLLOW_UP", "expected_topic": "Redis", "must_include_keywords": ["消息队列", "索引"], "allow_fallback": true, "minimum_quality_score": 0.81}
+{"case_id": "prompt_case_026", "expected_action": "ASK_NEXT", "expected_topic": "Concurrency", "must_include_keywords": ["延迟双删", "线程池"], "allow_fallback": false, "minimum_quality_score": 0.76}
+{"case_id": "prompt_case_027", "expected_action": "ASK_NEXT", "expected_topic": "Redis", "must_include_keywords": ["缓存", "线程池"], "allow_fallback": false, "minimum_quality_score": 0.78}
+{"case_id": "prompt_case_028", "expected_action": "FOLLOW_UP", "expected_topic": "Redis", "must_include_keywords": ["缓存", "事务"], "allow_fallback": false, "minimum_quality_score": 0.86}
+{"case_id": "prompt_case_029", "expected_action": "ASK_NEXT", "expected_topic": "MQ", "must_include_keywords": ["一致性", "事务"], "allow_fallback": true, "minimum_quality_score": 0.8}
+{"case_id": "prompt_case_030", "expected_action": "ASK_NEXT", "expected_topic": "Redis", "must_include_keywords": ["事务", "一致性"], "allow_fallback": true, "minimum_quality_score": 0.73}
