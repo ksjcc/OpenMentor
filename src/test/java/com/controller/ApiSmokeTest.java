@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -29,9 +30,11 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.http.MediaType.TEXT_PLAIN;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @ExtendWith(MockitoExtension.class)
@@ -74,41 +77,39 @@ class ApiSmokeTest {
 
   @Test
   void startInterviewRunsThrough() throws Exception {
-    InterviewReplyDTO reply = new InterviewReplyDTO();
-    reply.setSessionId(10L);
-    reply.setAction("QUESTION");
-    reply.setContent("Redis 如何保证缓存一致性？");
-    when(interviewService.startInterview(1L, "TECH", "Java后端开发", "Redis", null))
-        .thenReturn(reply);
+    SseEmitter emitter = new SseEmitter();
+    emitter.complete();
+    when(interviewService.startInterviewStream(1L, "TECH", "Java后端开发", "Redis", null))
+        .thenReturn(emitter);
 
-    mockMvc.perform(post("/api/interview/start")
+    var mvcResult = mockMvc.perform(post("/api/interview/start")
         .param("userId", "1")
         .param("interviewType", "TECH")
         .param("targetRole", "Java后端开发")
         .param("topic", "Redis"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.code").value(0))
-        .andExpect(jsonPath("$.data.sessionId").value(10))
-        .andExpect(jsonPath("$.data.action").value("QUESTION"));
+        .andExpect(request().asyncStarted())
+        .andReturn();
+
+    mockMvc.perform(asyncDispatch(mvcResult))
+        .andExpect(status().isOk());
   }
 
   @Test
   void answerInterviewRunsThrough() throws Exception {
-    InterviewReplyDTO reply = new InterviewReplyDTO();
-    reply.setSessionId(10L);
-    reply.setAction("FOLLOW_UP");
-    reply.setContent("继续说明延迟双删的缺点。");
-    when(interviewService.answerQuestion(1L, 10L, "Redis", "cache answer"))
-        .thenReturn(reply);
+    SseEmitter emitter = new SseEmitter();
+    emitter.complete();
+    when(interviewService.answerQuestionStream(1L, 10L, "Redis", "cache answer"))
+        .thenReturn(emitter);
 
-    mockMvc.perform(post("/api/interview/{sessionId}/answer", 10L)
+    var mvcResult = mockMvc.perform(post("/api/interview/{sessionId}/answer", 10L)
         .param("userId", "1")
         .param("topic", "Redis")
         .content("cache answer"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.code").value(0))
-        .andExpect(jsonPath("$.data.sessionId").value(10))
-        .andExpect(jsonPath("$.data.action").value("FOLLOW_UP"));
+        .andExpect(request().asyncStarted())
+        .andReturn();
+
+    mockMvc.perform(asyncDispatch(mvcResult))
+        .andExpect(status().isOk());
   }
 
   @Test

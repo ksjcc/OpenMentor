@@ -282,11 +282,29 @@ public class InterviewService {
                 // 旧版直接回答接口同样会调用 AI，因此复用同一个用户级限流规则。
                 aiRateLimitService.checkLimit(userId);
 
-                InterviewReplyDTO reply = agentOrchestrator.handleAnswer(
+                InterviewReplyDTO reply = agentOrchestrator.handleAnswerStream(
                                 userId,
                                 topic,
                                 topic,
-                                answer);
+                                answer,
+                                new StreamingChunkHandler() {
+                                        @Override
+                                        public void onStart(String requestId) {
+                                        }
+
+                                        @Override
+                                        public void onChunk(String chunk) {
+                                        }
+
+                                        @Override
+                                        public void onComplete(String fullContent) {
+                                        }
+
+                                        @Override
+                                        public void onError(Throwable throwable) {
+                                                throw new IllegalStateException("Legacy answer flow failed", throwable);
+                                        }
+                                });
                 if (reply == null || isBlank(reply.getContent())) {
                         throw new BizException(ErrorCode.INTERNAL_ERROR, "AI未生成下一步回复");
                 }

@@ -6,10 +6,10 @@ import com.ai.agent.FollowUpAgent;
 import com.ai.agent.GraphExtractionAgent;
 import com.ai.agent.KnowledgeExtractorAgent;
 import com.ai.agent.ResumeProfileAgent;
+import com.ai.agent.ReviewPlannerAgent;
 import com.ai.agent.ScoreAgent;
 import com.ai.agent.TechInterviewerAgent;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.service.AiServices;
+import com.ai.agent.support.AgentFactory;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import org.springframework.context.annotation.Bean;
@@ -19,43 +19,48 @@ import org.springframework.context.annotation.Configuration;
 public class AgentConfig {
 
     @Bean
-    public TechInterviewerAgent techInterviewerAgent(ChatLanguageModel model) {
-        return AiServices.create(TechInterviewerAgent.class, model);
+    public TechInterviewerAgent techInterviewerAgent(AgentFactory agentFactory) {
+        return agentFactory.createTechInterviewerAgent();
     }
 
     @Bean
-    public ScoreAgent scoreAgent(ChatLanguageModel model) {
-        return AiServices.create(ScoreAgent.class, model);
+    public ScoreAgent scoreAgent(AgentFactory agentFactory) {
+        return agentFactory.createScoreAgent();
     }
 
     @Bean
-    public FollowUpAgent followUpAgent(ChatLanguageModel model) {
-        return AiServices.create(FollowUpAgent.class, model);
+    public FollowUpAgent followUpAgent(AgentFactory agentFactory) {
+        return agentFactory.createFollowUpAgent();
     }
 
     @Bean
-    public KnowledgeExtractorAgent knowledgeExtractorAgent(ChatLanguageModel model) {
-        return AiServices.create(KnowledgeExtractorAgent.class, model);
+    public KnowledgeExtractorAgent knowledgeExtractorAgent(AgentFactory agentFactory) {
+        return agentFactory.createKnowledgeExtractorAgent();
     }
 
     @Bean
-    public ResumeProfileAgent resumeProfileAgent(ChatLanguageModel model) {
-        return AiServices.create(ResumeProfileAgent.class, model);
+    public ResumeProfileAgent resumeProfileAgent(AgentFactory agentFactory) {
+        return agentFactory.createResumeProfileAgent();
     }
 
     @Bean
-    public GraphExtractionAgent graphExtractionAgent(ChatLanguageModel model) {
-        return AiServices.create(GraphExtractionAgent.class, model);
+    public GraphExtractionAgent graphExtractionAgent(AgentFactory agentFactory) {
+        return agentFactory.createGraphExtractionAgent();
     }
 
     @Bean
-    public CommunityReportAgent CommunityReportAgent(ChatLanguageModel model) {
-        return AiServices.create(CommunityReportAgent.class, model);
+    public CommunityReportAgent communityReportAgent(AgentFactory agentFactory) {
+        return agentFactory.createCommunityReportAgent();
     }
 
     @Bean
-    public DriftQuestionAgent DriftQuestionAgent(ChatLanguageModel model) {
-        return AiServices.create(DriftQuestionAgent.class, model);
+    public DriftQuestionAgent driftQuestionAgent(AgentFactory agentFactory) {
+        return agentFactory.createDriftQuestionAgent();
+    }
+
+    @Bean
+    public ReviewPlannerAgent reviewPlannerAgent(AgentFactory agentFactory) {
+        return agentFactory.createReviewPlannerAgent();
     }
 
     @Bean
