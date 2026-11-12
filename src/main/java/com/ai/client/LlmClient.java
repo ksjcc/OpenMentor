@@ -1,7 +1,6 @@
 package com.ai.client;
 
 import com.ai.Stream.StreamingChunkHandler;
-import com.ai.runtime.PromptRuntimeTracker;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.model.StreamingResponseHandler;
 import dev.langchain4j.model.chat.ChatLanguageModel;
@@ -38,7 +37,6 @@ public class LlmClient {
                 String result = chatModel.generate(message);
                 long latency = System.currentTimeMillis() - start;
                 log.info("LLM success attempt={} latency={}ms", attempt, latency);
-                PromptRuntimeTracker.recordLlmCall(message, result, attempt, true, false);
                 return result;
             } catch (Exception e) {
                 log.warn("LLM failed attempt={}", attempt, e);
@@ -48,7 +46,6 @@ public class LlmClient {
         long latency = System.currentTimeMillis() - start;
         log.error("LLM fallback latency={}ms", latency);
         String fallback = fallbackSupplier.get();
-        PromptRuntimeTracker.recordLlmCall(message, fallback, MAX_RETRY, false, true);
         return fallback;
     }
 
@@ -91,7 +88,6 @@ public class LlmClient {
                 String result = resultFuture.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 long latency = System.currentTimeMillis() - start;
                 log.info("LLM stream success requestId={} attempt={} latency={}ms", requestId, attempt, latency);
-                PromptRuntimeTracker.recordLlmCall(message, result, attempt, true, false);
                 handler.onComplete(result);
                 return result;
             } catch (TimeoutException e) {
@@ -109,7 +105,6 @@ public class LlmClient {
         long latency = System.currentTimeMillis() - start;
         log.error("LLM stream fallback requestId={} latency={}ms", requestId, latency);
         String fallback = fallbackSupplier.get();
-        PromptRuntimeTracker.recordLlmCall(message, fallback, MAX_RETRY, false, true);
         handler.onChunk(fallback);
         handler.onComplete(fallback);
         return fallback;

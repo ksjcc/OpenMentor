@@ -6,26 +6,25 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 
 import com.ai.client.LlmClient;
-import com.ai.decision.RetrievalPlanningService;
 import com.ai.rag.HybridRetriever;
-import com.dto.Retrieval.RetrievalPlanDTO;
 
 import lombok.RequiredArgsConstructor;
 
 /**
  * 面向知识学习场景的问答服务。
+ *
+ * <p>改造后不再依赖已删除的检索规划器，直接用 HybridRetriever 的
+ * (userId, query, topK) 入口。检索规划这一步在 harness 里由模型通过工具完成，
+ * 不再有独立的规划组件。
  */
 @Service
 @RequiredArgsConstructor
 public class KnowledgeQaService {
-  private final RetrievalPlanningService retrievalPlanningService;
   private final HybridRetriever hybridRetriever;
   private final LlmClient llmClient;
 
   public String answer(Long userId, String question) {
-    RetrievalPlanDTO plan = retrievalPlanningService.plan(question, "", question);
-
-    List<String> contexts = new ArrayList<>(hybridRetriever.retrieve(userId, plan));
+    List<String> contexts = new ArrayList<>(hybridRetriever.retrieve(userId, question, 8));
 
     List<String> mergedContexts = contexts.stream()
         .filter(text -> text != null && !text.isBlank())
@@ -33,16 +32,13 @@ public class KnowledgeQaService {
         .limit(8)
         .toList();
 
-    String prompt = buildAnswerPrompt(question, mergedContexts, plan);
+    String prompt = buildAnswerPrompt(question, mergedContexts);
     return llmClient.safeChat(
         prompt,
         () -> "我暂时没能组织出稳定答案，请稍后重试。");
   }
 
-  private String buildAnswerPrompt(
-      String question,
-      List<String> contexts,
-      RetrievalPlanDTO plan) {
+  private String buildAnswerPrompt(String question, List<String> contexts) {
     String contextBlock = contexts.isEmpty()
         ? "暂无可用检索上下文，请基于通用技术知识谨慎回答，并明确指出未命中用户专属上下文。"
         : String.join("\n\n---\n\n", contexts);
@@ -57,16 +53,12 @@ public class KnowledgeQaService {
         3. 如果上下文不足，要明确说明，并给出稳妥的通用解释。
         4. 回答风格偏技术辅导，不要使用“下一题”“追问”等面试语气。
 
-        检索计划：
-        %s
-
         用户问题：
         %s
 
         检索上下文：
         %s
         """.formatted(
-        plan.getReason() == null ? "unknown" : plan.getReason(),
         question == null ? "" : question,
         contextBlock);
   }
