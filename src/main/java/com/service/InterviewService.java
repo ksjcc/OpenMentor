@@ -33,7 +33,8 @@ import lombok.RequiredArgsConstructor;
 /**
  * 面试业务层。
  *
- * <p>改造后本类只做三件事：事务与持久化、限流与校验、调用 harness。
+ * <p>
+ * 改造后本类只做三件事：事务与持久化、限流与校验、调用 harness。
  * <b>不包含任何"下一步该做什么"的流程判断</b> —— 那是 harness 里模型的职责。
  */
 @Service
@@ -89,6 +90,8 @@ public class InterviewService {
                 saveMessage(sessionId, ROLE_AI, AGENT_CODE, outcome.content());
 
                 // 4. 通过 SSE 返回
+                //    session 事件让前端拿到本场 sessionId —— 后续回答、结束面试都要用它
+                sendEvent(emitter, "session", String.valueOf(sessionId));
                 sendEvent(emitter, "action", outcome.action());
                 sendEvent(emitter, "chunk", outcome.content());
                 emitter.complete();
@@ -108,7 +111,7 @@ public class InterviewService {
                 SseEmitter emitter = new SseEmitter(0L);
                 InterviewSession session = assertSessionInProgress(userId, sessionId);
 
-                // 1. 限流（一次回答会触发多步工具调用，成本比单次 chat 高）
+                // 1. 限流
                 aiRateLimitService.checkLimit(userId);
 
                 // 2. 找出本轮要回答的问题
@@ -205,7 +208,8 @@ public class InterviewService {
         /**
          * 旧版无 sessionId 的直接回答接口。
          *
-         * <p>为了不破坏已有调用方保留，但每次调用都是独立的临时会话（没有跨轮记忆），
+         * <p>
+         * 为了不破坏已有调用方保留，但每次调用都是独立的临时会话（没有跨轮记忆），
          * 新代码请用 {@link #answerQuestionStream}。
          */
         public String handleAnswer(Long userId, String topic, String answer) {
@@ -275,7 +279,7 @@ public class InterviewService {
         /**
          * 本轮要回答的问题 = 最近一条 AI 消息。
          *
-         * <p>注意：这里只负责"找出问题"，不再自己拼接 prompt ——
+         * 这里只负责"找出问题"，不再自己拼接 prompt ——
          * 上下文由 harness 的工具按需去取。
          */
         private String resolveCurrentQuestion(Long sessionId) {

@@ -1,0 +1,11 @@
+{
+  "name": "agentcareer-console",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "AgentCareer 面试与能力成长控制台（零依赖静态前端）",
+  "scripts": {
+    "dev": "node serve.mjs",
+    "start": "node serve.mjs"
+  }
+}

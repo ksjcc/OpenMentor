@@ -11,8 +11,6 @@ import lombok.RequiredArgsConstructor;
 
 /**
  * 面试后处理消息生产者
- *
- * 作用：
  * finishInterview() 中不再同步做所有后处理，
  * 而是把任务发送到 RabbitMQ。
  */

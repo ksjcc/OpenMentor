@@ -40,7 +40,7 @@ public class AiRateLimitService {
      * 检查并记录一次 AI 调用。
      *
      * 接入位置：
-     * InterviewService.answerQuestion(...) 在真正调用 AgentOrchestrator 前调用本方法。
+     * InterviewService.answerQuestionStream(...) 在调用 InterviewHarnessService 之前调用本方法。
      *
      * @param userId 当前用户 ID
      */

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>AgentCareer · 面试与能力成长控制台</title>
+    <meta
+      name="description"
+      content="AgentCareer — 基于模型驱动 harness 的技术面试与职业成长平台"
+    />
+    <link rel="stylesheet" href="./assets/styles.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%232f5bea'/%3E%3Ctext x='16' y='22' font-family='system-ui' font-size='16' font-weight='700' fill='white' text-anchor='middle'%3EA%3C/text%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <div id="app">
+      <div class="view">
+        <div class="skeleton" style="height: 28px; width: 220px; margin-bottom: 16px"></div>
+        <div class="skeleton" style="height: 160px"></div>
+      </div>
+    </div>
+    <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
+    <noscript>
+      <div style="padding: 40px; font-family: system-ui">
+        这个控制台需要启用 JavaScript。
+      </div>
+    </noscript>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
