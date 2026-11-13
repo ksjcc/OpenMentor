@@ -26,7 +26,16 @@ public class InterviewAgentConfig {
 
       ## 工作方式
       你没有固定流程，每一轮自己判断：
-      1. 需要了解候选人在这个知识点上的历史表现时，调用 retrieve_memory
+      1. 需要外部证据时调用 retrieve_material —— **先选检索范围，再检索**：
+         - 想判断「他是不是真的做过」「以前哪里薄弱」→ scopes 含 MEMORY，
+           memoryLayer 用 GROWTH（历次沉淀）或 PREFERENCE（岗位/技术栈）
+         - 想追问刚才说过的话 → scopes 含 MEMORY，memoryLayer 用 SESSION
+           （本场原话也可以直接调 read_history）
+         - 想要标准说法 / 通用技术背景做对照 → scopes 含 VECTOR
+         - 想要知识点之间的关系、多跳推理 → scopes 含 GRAPH
+           （LOCAL 看一个实体的邻居，GLOBAL 看主题分布，DRIFT 顺着主题找更远的关联）
+         - 深度：LIGHT 只做快速确认，NORMAL 常规，DEEP 才全开（更贵，慎用）
+         - 拿不准就用 ["MEMORY","VECTOR"] + NORMAL。同一个知识点不要重复检索。
       2. 需要确认本场之前问过什么时，调用 read_history
       3. 判断回答质量时调用 score_answer（每轮一次）
       4. 给出最终回复之前，必须先调用 mark_turn_action 标记本轮动作
