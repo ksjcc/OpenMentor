@@ -99,6 +99,9 @@ const ICONS = {
     '<path d="M21 12a8 8 0 0 1-8 8H7l-4 3V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z"/><path d="M9 11h6M9 15h4"/>',
   report:
     '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/>',
+  resume:
+    '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10.5" r="2"/><path d="M5.6 16a3.4 3.4 0 0 1 6.8 0"/><path d="M14.5 9.5h4M14.5 13h4"/>',
+  upload: '<path d="M12 19V6"/><path d="m7 11 5-5 5 5"/><path d="M4 19h16"/>',
   knowledge:
     '<circle cx="12" cy="5" r="2.4"/><circle cx="5" cy="18" r="2.4"/><circle cx="19" cy="18" r="2.4"/><path d="M12 7.4 6.2 15.8M12 7.4l5.8 8.4M7.4 18h9.2"/>',
   memory:

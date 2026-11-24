@@ -1,32 +1,26 @@
 package com.service.cache;
 
-import com.common.BizException;
-import com.common.ErrorCode;
-import lombok.RequiredArgsConstructor;
+import java.time.Duration;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
+import com.common.BizException;
+import com.common.ErrorCode;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * AI 调用限流服务。
  *
- * 目标：
- * 限制单个用户调用 AI 的频率，避免瞬时高频请求打爆模型服务或造成费用风险。
- *
- * 限流规则：
- * 每个用户每分钟最多 10 次 AI 调用。
- *
- * Redis Key：
- * ai:limit:user:{userId}
- *
- * Redis 实现：
- * 1. INCR：每次调用 AI 前，对用户计数器加 1。
- * 2. EXPIRE：第一次计数时设置 60 秒过期时间，形成一分钟统计窗口。
- *
- * 超限行为：
- * 抛出 BizException，提示“AI调用过于频繁，请稍后再试”。
+ * <p>
+ * 规则：每个用户每分钟最多 10 次 AI 调用。正常走 Redis 的 INCR + EXPIRE，
+ * Redis 不可用时降级为进程内计数——单个用户偶尔超限比"整个面试功能不可用"要好。
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AiRateLimitService {
@@ -36,41 +30,50 @@ public class AiRateLimitService {
 
     private final RedisTemplate<String, Object> redisTemplate;
 
-    /**
-     * 检查并记录一次 AI 调用。
-     *
-     * 接入位置：
-     * InterviewService.answerQuestionStream(...) 在调用 InterviewHarnessService 之前调用本方法。
-     *
-     * @param userId 当前用户 ID
-     */
+    /** 降级用的本地窗口：userId -> [窗口起始毫秒, 计数] */
+    private final Map<Long, long[]> localWindows = new ConcurrentHashMap<>();
+
     public void checkLimit(Long userId) {
         if (userId == null) {
             throw new BizException(ErrorCode.BAD_REQUEST, "用户ID不能为空");
         }
 
-        String key = buildKey(userId);
-
-        // INCR 是 Redis 原子操作，适合在多实例部署下统计同一个用户的调用次数。
-        Long currentCount = redisTemplate.opsForValue().increment(key);
-        if (currentCount == null) {
-            throw new BizException(ErrorCode.INTERNAL_ERROR, "AI限流计数失败");
-        }
-
-        // 第一次调用时设置过期时间，形成固定 60 秒窗口。
-        if (currentCount == 1L) {
-            redisTemplate.expire(key, LIMIT_WINDOW);
-        }
+        long currentCount = increase(userId);
 
         if (currentCount > MAX_CALLS_PER_MINUTE) {
             throw new BizException(ErrorCode.BAD_REQUEST, "AI调用过于频繁，请稍后再试");
         }
     }
 
-    /**
-     * 构建项目统一的 AI 限流 Redis Key。
-     */
-    private String buildKey(Long userId) {
-        return KEY_TEMPLATE.formatted(userId);
+    private long increase(Long userId) {
+        String key = KEY_TEMPLATE.formatted(userId);
+        try {
+            Long currentCount = redisTemplate.opsForValue().increment(key);
+            if (currentCount == null) {
+                return increaseLocally(userId);
+            }
+            // 第一次调用时设置过期时间，形成固定 60 秒窗口
+            if (currentCount == 1L) {
+                redisTemplate.expire(key, LIMIT_WINDOW);
+            }
+            return currentCount;
+        } catch (Exception ex) {
+            log.warn("限流计数降级为本地内存 userId={} reason={}", userId, ex.getMessage());
+            return increaseLocally(userId);
+        }
+    }
+
+    /** Redis 不可用时的进程内滑窗计数。 */
+    private long increaseLocally(Long userId) {
+        long now = System.currentTimeMillis();
+        long windowMillis = LIMIT_WINDOW.toMillis();
+        long[] window = localWindows.compute(userId, (key, existing) -> {
+            if (existing == null || now - existing[0] >= windowMillis) {
+                return new long[] { now, 1 };
+            }
+            existing[1] = existing[1] + 1;
+            return existing;
+        });
+        return window[1];
     }
 }

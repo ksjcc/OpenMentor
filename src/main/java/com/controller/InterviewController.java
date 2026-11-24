@@ -1,17 +1,24 @@
 package com.controller;
 
-import com.common.Result;
-import com.dto.InterviewReplyDTO;
-import com.service.InterviewService;
-import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.tags.Tag;
+import java.util.List;
+
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
+import com.common.Result;
+import com.dto.interview.InterviewReportDTO;
+import com.dto.interview.InterviewSummaryDTO;
+import com.service.InterviewService;
+
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 
 @RestController
 @RequestMapping("/api/interview")
@@ -24,6 +31,13 @@ public class InterviewController {
                 this.interviewService = interviewService;
         }
 
+        /**
+         * 开始一场面试。
+         *
+         * <p>
+         * resumeId 指向简历库中的一份简历，会被注入面试官上下文；
+         * 不传时使用该用户的默认简历（没有简历也能正常面试）。
+         */
         @PostMapping("/start")
         @Operation(summary = "启动模拟面试")
         public SseEmitter startInterview(
@@ -31,14 +45,17 @@ public class InterviewController {
                         @RequestParam String interviewType,
                         @RequestParam String targetRole,
                         @RequestParam String topic,
-                        @RequestParam(required = false) String projectSummary) {
+                        @RequestParam(required = false) String projectSummary,
+                        @RequestParam(required = false) Long resumeId,
+                        @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
                 return interviewService.startInterviewStream(
                                 userId,
                                 interviewType,
                                 targetRole,
                                 topic,
-                                projectSummary);
-
+                                projectSummary,
+                                resumeId,
+                                idempotencyKey);
         }
 
         /**
@@ -53,13 +70,13 @@ public class InterviewController {
         public SseEmitter answerQuestion(
                         @PathVariable Long sessionId,
                         @RequestParam Long userId,
-                        @RequestParam String topic,
+                        @RequestParam(required = false) String topic,
                         @RequestBody String answer) {
                 return interviewService.answerQuestionStream(
                                 userId,
                                 sessionId,
                                 topic,
-                                answer);
+                                stripJsonQuotes(answer));
         }
 
         /**
@@ -77,26 +94,57 @@ public class InterviewController {
                                 interviewService.finishInterview(userId, sessionId));
         }
 
-        // @GetMapping("/question")
-        // @Operation(summary = "生成面试问题")
-        // public Result<String> question(@RequestParam Long userId, @RequestParam
-        // String topic) {
-        // return Result.success(interviewservice.generateQuestion(userId, topic));
-        // }
+        /**
+         * 我的面试记录。
+         */
+        @GetMapping
+        @Operation(summary = "面试记录列表")
+        public Result<List<InterviewSummaryDTO>> list(
+                        @RequestParam Long userId,
+                        @RequestParam(required = false) Integer limit) {
+                return Result.success(interviewService.listInterviews(userId, limit));
+        }
+
+        /**
+         * 单场复盘报告：对话、评分、知识提炼、闪卡都在这里。
+         */
+        @GetMapping("/{sessionId}")
+        @Operation(summary = "面试复盘报告")
+        public Result<InterviewReportDTO> report(
+                        @PathVariable Long sessionId,
+                        @RequestParam Long userId) {
+                return Result.success(interviewService.getInterviewReport(userId, sessionId));
+        }
 
         @PostMapping("/answer")
-        @Operation(summary = "处理用户回答")
+        @Operation(summary = "处理用户回答（无会话，兼容旧接口）")
         public Result<String> answer(
                         @RequestParam Long userId,
                         @RequestParam String topic,
                         @RequestBody String answer) {
                 return Result.success(
-                                interviewService.handleAnswer(userId, topic, answer));
+                                interviewService.handleAnswer(userId, topic, stripJsonQuotes(answer)));
         }
 
         @PostMapping("/{sessionId}/stop")
         public Result<String> stopStream(@PathVariable Long sessionId, @RequestParam Long userId) {
                 interviewService.stopStream(userId, sessionId);
                 return Result.success("stopped");
+        }
+
+        /**
+         * 前端历史上用 application/json 发送纯文本，body 会带上首尾引号。
+         * 这里去掉一层引号，避免把 {@code "回答"} 原样写进对话记录。
+         */
+        private String stripJsonQuotes(String body) {
+                if (body == null) {
+                        return null;
+                }
+                String text = body.trim();
+                if (text.length() >= 2 && text.startsWith("\"") && text.endsWith("\"")) {
+                        String inner = text.substring(1, text.length() - 1);
+                        return inner.replace("\\\"", "\"").replace("\\n", "\n").replace("\\\\", "\\");
+                }
+                return body;
         }
 }

@@ -11,7 +11,6 @@
 
 import { api } from "../api.js";
 import { store } from "../store.js";
-import { mockInterviewScript, mockReport } from "../mock.js";
 import { badge, esc, fmt, icon, toast } from "../ui.js";
 
 const ACTION_LABEL = {
@@ -34,8 +33,21 @@ let abortController = null;
 
 /* ------------------------------ 设置表单 ------------------------------ */
 
-function setupHtml() {
+function resumeOptionsHtml(resumes) {
+  const options = resumes
+    .map(
+      (resume) =>
+        `<option value="${resume.id}" ${resume.isDefault === 1 ? "selected" : ""}>${esc(
+          resume.title,
+        )}${resume.isDefault === 1 ? "（默认）" : ""}</option>`,
+    )
+    .join("");
+  return `<option value="0">不关联简历（通用技术面）</option>${options}`;
+}
+
+function setupHtml(resumes = []) {
   const s = store.settings;
+  const hasResume = resumes.length > 0;
   return `
     <div class="grid grid-1-2">
       <div class="card">
@@ -62,8 +74,20 @@ function setupHtml() {
             <div class="field-hint">一个具体主题比"技术面"更能逼出深度追问。</div>
           </div>
           <div class="field">
-            <label class="field-label" for="f-summary">项目摘要（可选）</label>
-            <textarea class="textarea" id="f-summary" placeholder="贴一段简历或项目描述，面试官会围绕它追问">${esc(
+            <label class="field-label" for="f-resume">关联简历</label>
+            ${
+              hasResume
+                ? `<select class="select" id="f-resume">${resumeOptionsHtml(resumes)}</select>
+                   <div class="field-hint">面试官会读到这份简历，并围绕里面的项目追问。</div>`
+                : `<div class="row" style="gap:8px">
+                     <span class="hint">还没有简历，面试官只能按通用技术面提问。</span>
+                     <button class="btn btn-sm" id="go-resume" type="button">去添加</button>
+                   </div>`
+            }
+          </div>
+          <div class="field">
+            <label class="field-label" for="f-summary">补充项目摘要（可选）</label>
+            <textarea class="textarea" id="f-summary" placeholder="简历之外想重点聊的项目，写在这里">${esc(
               s.projectSummary,
             )}</textarea>
           </div>
@@ -122,6 +146,9 @@ function messagesHtml() {
               ACTION_LABEL[msg.action] || msg.action
             }</span>`
           : "";
+      // 降级回复不是模型输出：标注出来，避免用户以为面试官"真的这么问"
+      const degradedBadge =
+        isAi && msg.degraded ? `<span class="badge badge-warn">降级</span>` : "";
       return `<div class="msg ${isAi ? "ai" : "user"}" data-msg="${msg.id}">
         <div class="msg-avatar">${isAi ? "AI" : "你"}</div>
         <div>
@@ -129,7 +156,7 @@ function messagesHtml() {
             msg.streaming ? '<span class="caret"></span>' : ""
           }</div>
           <div class="msg-meta">
-            ${actionBadge}
+            ${actionBadge}${degradedBadge}
             <span>${esc(fmt.time(msg.at))}</span>
           </div>
         </div>
@@ -153,6 +180,9 @@ function sessionPanelHtml() {
           <dt>目标岗位</dt><dd>${esc(s.targetRole || "—")}</dd>
           <dt>轮次</dt><dd class="num">${s.turnIndex}</dd>
           <dt>当前动作</dt><dd>${badge(action, tone)}</dd>
+          <dt>服务状态</dt><dd>${
+            s.degraded ? badge("降级兜底", "warn") : badge("正常", "ok")
+          }</dd>
           <dt>会话 ID</dt><dd class="mono">${esc(s.sessionId || "—")}</dd>
         </dl>
       </div>
@@ -248,46 +278,27 @@ function pushMessage(role, text, extra = {}) {
   return msg;
 }
 
-/* ------------------------------ 演示模式 ------------------------------- */
-
-async function runDemoScript() {
-  const script = mockInterviewScript(store.session.topic || "Redis");
-  store.session.sessionId = `demo-${Date.now()}`;
-  store.session.turnIndex = 1;
-
-  const aiMessage = pushMessage("ai", "", { streaming: true });
-  repaintChat();
-
-  for (const step of script) {
-    await new Promise((resolve) => setTimeout(resolve, step.delay));
-    if (step.event === "action") {
-      store.session.action = step.data;
-      aiMessage.action = step.data;
-      repaintPanel();
-    } else if (step.event === "chunk") {
-      aiMessage.text = step.data;
-      aiMessage.streaming = false;
-      repaintChat();
-    } else if (step.event === "score") {
-      store.session.score = step.data;
-      repaintPanel();
-    } else if (step.event === "session") {
-      store.session.sessionId = step.data;
-    }
-  }
-  store.session.toolTrail = [
-    { tool: "score_answer", detail: "总分 82；薄弱点：RDB fork 代价", ok: true },
-    { tool: "mark_turn_action", detail: "NEXT", ok: true },
-  ];
-  repaintPanel();
-}
-
 /* ------------------------------ 真实调用 ------------------------------- */
 
 function handleEvent(message) {
   return ({ event, data }) => {
     if (event === "session") {
       store.session.sessionId = data;
+      repaintPanel();
+      return;
+    }
+    if (event === "duplicate") {
+      // 后端幂等命中：这次没有新建，而是接回了同一场
+      store.session.duplicate = true;
+      toast("这场面试刚才已经创建过，已为你接回原会话", "warn");
+      repaintPanel();
+      return;
+    }
+    if (event === "degraded") {
+      // 模型不可用，后端给了确定性兜底回复
+      message.degraded = true;
+      store.session.degraded = true;
+      repaintChat();
       repaintPanel();
       return;
     }
@@ -315,46 +326,88 @@ function handleEvent(message) {
   };
 }
 
+/* 创建面试的幂等状态：同一次提交重发时复用同一个键，创建成功后才作废 */
+let startInFlight = false;
+let pendingIdempotencyKey = null;
+
+function newIdempotencyKey() {
+  if (globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+  return `idem-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 async function startInterview(root) {
+  // 双保险：DOM 还没被替换掉的极短窗口里，挡住第二次触发
+  if (startInFlight) {
+    return;
+  }
+
   const topic = root.querySelector("#f-topic").value.trim();
   const targetRole = root.querySelector("#f-role").value.trim();
   const interviewType = root.querySelector("#f-type").value;
   const projectSummary = root.querySelector("#f-summary").value.trim();
+  const resumeSelect = root.querySelector("#f-resume");
+  // 0 = 用户显式选择「不关联简历」；null = 没有选择控件，交给后端用默认简历
+  const resumeId = resumeSelect && resumeSelect.value !== "" ? Number(resumeSelect.value) : null;
 
   if (!topic || !targetRole) {
     toast("主题和目标岗位都要填", "warn");
     return;
   }
 
-  store.set({ topic, targetRole, interviewType, projectSummary });
-  store.resetSession({ topic, targetRole, interviewType, status: "running", startedAt: new Date().toISOString() });
-  await renderRouting();
-
-  if (store.settings.demo) {
-    await runDemoScript();
-    return;
+  const button = root.querySelector("#start");
+  startInFlight = true;
+  if (button) {
+    button.disabled = true;
+    button.innerHTML = "正在创建…";
   }
 
-  const message = pushMessage("ai", "", { streaming: true });
-  repaintChat();
-  abortController = new AbortController();
+  // 失败重试沿用同一个键（后端据此重放到同一场），成功后才换新键
+  const idempotencyKey = pendingIdempotencyKey || newIdempotencyKey();
+  pendingIdempotencyKey = idempotencyKey;
+
+  let message = null;
   try {
+    store.set({ topic, targetRole, interviewType, projectSummary });
+    store.resetSession({
+      topic,
+      targetRole,
+      interviewType,
+      status: "running",
+      startedAt: new Date().toISOString(),
+    });
+    await renderRouting();
+
+    message = pushMessage("ai", "", { streaming: true });
+    repaintChat();
+    abortController = new AbortController();
     await api.startInterview({
       userId: store.settings.userId,
       interviewType,
       targetRole,
       topic,
       projectSummary,
+      resumeId,
+      idempotencyKey,
       signal: abortController.signal,
       onEvent: handleEvent(message),
     });
+
+    // 只有真正创建成功才作废键：下一次点击才是全新一场
+    pendingIdempotencyKey = null;
   } catch (error) {
-    message.streaming = false;
-    message.text = `开局失败：${error.message}`;
-    repaintChat();
+    if (message) {
+      message.streaming = false;
+      message.text = `开局失败：${error.message}`;
+      repaintChat();
+    }
     toast(error.message, "err");
     store.session.status = "error";
+    // 故意保留 pendingIdempotencyKey：用户点「重开」再试时后端会重放同一场，
+    // 不会因为网络抖动多建一场面试
   } finally {
+    startInFlight = false;
     abortController = null;
   }
 }
@@ -373,26 +426,6 @@ async function sendAnswer(root) {
   box.value = "";
   const aiMessage = pushMessage("ai", "", { streaming: true });
   repaintChat();
-
-  if (store.settings.demo) {
-    await new Promise((resolve) => setTimeout(resolve, 700));
-    aiMessage.text =
-      "你提到用 AOF 兜底，但没说 fsync 策略。如果这台机器盘很慢，always 会把写延迟打到多少？" +
-      "在这个前提下，你会把 appendfsync 设成什么，为什么？";
-    aiMessage.action = "FOLLOW_UP";
-    aiMessage.streaming = false;
-    store.session.action = "FOLLOW_UP";
-    store.session.turnIndex += 1;
-    store.session.toolTrail = [
-      ...store.session.toolTrail,
-      { tool: "read_history", detail: "最近 2 轮", ok: true },
-      { tool: "mark_turn_action", detail: "FOLLOW_UP", ok: true },
-    ];
-    repaintChat();
-    repaintPanel();
-    sendButton.disabled = false;
-    return;
-  }
 
   abortController = new AbortController();
   try {
@@ -418,12 +451,6 @@ async function sendAnswer(root) {
 }
 
 async function finishInterview() {
-  if (store.settings.demo) {
-    store.session.report = mockReport;
-    store.session.status = "finished";
-    location.hash = "#/report";
-    return;
-  }
   try {
     const raw = await api.finishInterview({
       userId: store.settings.userId,
@@ -438,12 +465,22 @@ async function finishInterview() {
   }
 }
 
+async function loadResumes() {
+  try {
+    return (await api.resumeList(store.settings.userId)) || [];
+  } catch {
+    // 简历库拉不到不应该挡住宿主流程：退化为"不关联简历"
+    return [];
+  }
+}
+
 async function renderRouting() {
   const host = document.getElementById("view");
   if (!host) return;
   const running = store.session.status === "running" || store.session.status === "error";
+  const resumes = running ? [] : await loadResumes();
   host.innerHTML = `<div class="view">${pageHead()}${
-    running ? runningHtml() : setupHtml()
+    running ? runningHtml() : setupHtml(resumes)
   }</div>`;
   if (running) {
     bindRunning(host);
@@ -472,6 +509,9 @@ function pageHead() {
 
 function bindSetup(root) {
   root.querySelector("#start")?.addEventListener("click", () => startInterview(root));
+  root.querySelector("#go-resume")?.addEventListener("click", () => {
+    location.hash = "#/resume";
+  });
 }
 
 function bindRunning(root) {
@@ -486,6 +526,9 @@ function bindRunning(root) {
   root.querySelector("#finish")?.addEventListener("click", finishInterview);
   root.querySelector("#reset")?.addEventListener("click", () => {
     abortController?.abort();
+    // 显式「重开」= 用户想要一场新的面试，作废幂等键，避免被重放回旧会话
+    pendingIdempotencyKey = null;
+    startInFlight = false;
     store.resetSession();
     renderRouting();
   });
@@ -497,15 +540,20 @@ export default {
 
   async render() {
     const running = store.session.status === "running" || store.session.status === "error";
-    return {
-      html: `${pageHead()}${running ? runningHtml() : setupHtml()}`,
-      after(root) {
-        if (running) {
+    if (running) {
+      return {
+        html: `${pageHead()}${runningHtml()}`,
+        after(root) {
           bindRunning(root);
           scrollChat();
-        } else {
-          bindSetup(root);
-        }
+        },
+      };
+    }
+    const resumes = await loadResumes();
+    return {
+      html: `${pageHead()}${setupHtml(resumes)}`,
+      after(root) {
+        bindSetup(root);
       },
     };
   },

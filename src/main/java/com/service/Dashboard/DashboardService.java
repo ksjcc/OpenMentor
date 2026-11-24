@@ -11,12 +11,14 @@ import com.dto.dashboard.WeaknessRankDTO;
 import com.dto.extraction.KnowledgeExtractionResult;
 import com.dto.extraction.WeaknessDTO;
 import com.entity.Flashcard;
+import com.entity.InterviewMessage;
 import com.entity.InterviewSession;
 import com.entity.MemoryProfileJson;
 import com.entity.UserProfile;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mapper.FlashcardMapper;
+import com.mapper.InterviewMessageMapper;
 import com.mapper.InterviewSessionMapper;
 import com.mapper.MemoryProfileJsonMapper;
 import com.mapper.UserProfileMapper;
@@ -46,10 +48,13 @@ import java.util.Map;
 public class DashboardService {
   private static final String STATUS_FINISHED = "FINISHED";
   private static final int MAX_RECENT_SUMMARIES = 10;
+  private static final int TREND_WINDOW = 14;
+  private static final int RATING_WINDOW = 100;
 
   private final MemoryProfileJsonMapper memoryProfileJsonMapper;
   private final UserProfileMapper userProfileMapper;
   private final InterviewSessionMapper interviewSessionMapper;
+  private final InterviewMessageMapper interviewMessageMapper;
   private final FlashcardMapper flashcardMapper;
   private final LearningRecommendationService learningRecommendationService;
   private final ObjectMapper objectMapper;
@@ -84,7 +89,65 @@ public class DashboardService {
     dashboard.setWeaknesses(
         buildWeaknesses(userId));
 
+    // =========================
+    // 6. 总览 KPI 与得分趋势（全部来自真实 session）
+    // =========================
+    List<InterviewSession> rated = getRatedSessions(userId);
+    dashboard.setTotalSessions(countSessions(userId));
+    dashboard.setAverageScore(averageOf(rated));
+    dashboard.setScoreTrend(rated.stream().map(InterviewSession::getScore).toList());
+    dashboard.setTrendLabels(rated.stream().map(this::trendLabel).toList());
+
     return dashboard;
+  }
+
+  private Integer countSessions(Long userId) {
+    Long count = interviewSessionMapper.selectCount(
+        new LambdaQueryWrapper<InterviewSession>()
+            .eq(InterviewSession::getUserId, userId));
+    return count == null ? 0 : count.intValue();
+  }
+
+  /** 最近有评分的场次，按时间升序，用于画趋势。 */
+  private List<InterviewSession> getRatedSessions(Long userId) {
+    List<InterviewSession> sessions = interviewSessionMapper.selectList(
+        new LambdaQueryWrapper<InterviewSession>()
+            .eq(InterviewSession::getUserId, userId)
+            .isNotNull(InterviewSession::getScore)
+            .orderByDesc(InterviewSession::getId)
+            .last("LIMIT " + RATING_WINDOW));
+    if (sessions == null || sessions.isEmpty()) {
+      return List.of();
+    }
+    List<InterviewSession> ordered = new ArrayList<>(sessions);
+    ordered.sort(Comparator.comparing(InterviewSession::getId));
+    if (ordered.size() > TREND_WINDOW) {
+      return ordered.subList(ordered.size() - TREND_WINDOW, ordered.size());
+    }
+    return ordered;
+  }
+
+  private Integer averageOf(List<InterviewSession> sessions) {
+    if (sessions == null || sessions.isEmpty()) {
+      return null;
+    }
+    int sum = 0;
+    int count = 0;
+    for (InterviewSession session : sessions) {
+      if (session.getScore() != null) {
+        sum += session.getScore();
+        count++;
+      }
+    }
+    return count == 0 ? null : Math.round((float) sum / count);
+  }
+
+  private String trendLabel(InterviewSession session) {
+    LocalDateTime time = session.getEndedAt() != null ? session.getEndedAt() : session.getStartTime();
+    if (time == null) {
+      return "";
+    }
+    return "%02d-%02d".formatted(time.getMonthValue(), time.getDayOfMonth());
   }
 
   /**
@@ -162,6 +225,23 @@ public class DashboardService {
             .orderByDesc(InterviewSession::getId)
             .last("LIMIT 5"));
 
+    if (sessions == null || sessions.isEmpty()) {
+      return List.of();
+    }
+
+    // 一次查出这几场的消息，统计每场的提问轮次
+    List<Long> sessionIds = sessions.stream().map(InterviewSession::getId).toList();
+    List<InterviewMessage> messages = interviewMessageMapper.selectList(
+        new LambdaQueryWrapper<InterviewMessage>()
+            .in(InterviewMessage::getSessionId, sessionIds)
+            .eq(InterviewMessage::getRole, "ai"));
+    Map<Long, Integer> turns = new LinkedHashMap<>();
+    if (messages != null) {
+      for (InterviewMessage message : messages) {
+        turns.merge(message.getSessionId(), 1, Integer::sum);
+      }
+    }
+
     List<RecentInterviewDTO> list = new ArrayList<>();
 
     for (InterviewSession session : sessions) {
@@ -172,12 +252,33 @@ public class DashboardService {
       dto.setInterviewType(session.getInterviewType());
       dto.setTargetRole(session.getTargetRole());
       dto.setStatus(session.getStatus());
+      dto.setTopic(session.getTopic());
+      dto.setScore(session.getScore());
+      dto.setTurns(turns.getOrDefault(session.getId(), 0));
+      dto.setTopWeakness(firstWeaknessOf(session.getSummary()));
       dto.setCreatedAt(session.getStartTime());
+      dto.setEndedAt(session.getEndedAt());
 
       list.add(dto);
     }
 
     return list;
+  }
+
+  private String firstWeaknessOf(String summaryJson) {
+    if (isBlank(summaryJson)) {
+      return null;
+    }
+    try {
+      KnowledgeExtractionResult extraction = jsonParseService.parseExtractionLenient(summaryJson);
+      if (extraction.getWeaknesses() == null || extraction.getWeaknesses().isEmpty()) {
+        return null;
+      }
+      WeaknessDTO weakness = extraction.getWeaknesses().get(0);
+      return weakness == null || isBlank(weakness.getName()) ? null : weakness.getName().trim();
+    } catch (Exception ex) {
+      return null;
+    }
   }
 
   /**

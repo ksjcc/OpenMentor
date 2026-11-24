@@ -4,17 +4,22 @@
  * 用法：
  *   node serve.mjs            # http://localhost:5173
  *   node serve.mjs 8081       # 指定端口
+ *   API_TARGET=http://127.0.0.1:8080 node serve.mjs
  *
- * 生产环境请把整个 frontend 目录交给 Nginx，或复制到
- * src/main/resources/static/ 由 Spring Boot 托管。
+ * 前端只发同源请求（/api/**）。本地联调时由这里把 /api 转发给后端，
+ * 所以前端本身不需要、也不提供"后端地址"配置。
+ * 生产环境两种部署方式都不需要前端配置地址：
+ *   1. 复制到 src/main/resources/static/ 由 Spring Boot 同源托管；
+ *   2. 交给 Nginx，location /api 反代到后端。
  */
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const port = Number(process.argv[2] || process.env.PORT || 5173);
+const apiTarget = new URL(process.env.API_TARGET || "http://127.0.0.1:8080");
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -29,6 +34,41 @@ const MIME = {
   ".woff2": "font/woff2",
   ".map": "application/json; charset=utf-8",
 };
+
+/** 把 /api/** 原样转发到后端（含 SSE：直接管道透传，不缓冲）。 */
+function proxy(req, res) {
+  const upstream = httpRequest(
+    {
+      protocol: apiTarget.protocol,
+      hostname: apiTarget.hostname,
+      port: apiTarget.port || 80,
+      path: req.url,
+      method: req.method,
+      headers: { ...req.headers, host: apiTarget.host },
+    },
+    (upstreamRes) => {
+      res.writeHead(upstreamRes.statusCode || 502, upstreamRes.headers);
+      upstreamRes.pipe(res);
+    },
+  );
+
+  upstream.on("error", (error) => {
+    if (res.headersSent) {
+      res.end();
+      return;
+    }
+    res.writeHead(502, { "content-type": "application/json; charset=utf-8" });
+    res.end(
+      JSON.stringify({
+        code: 502,
+        message: `后端未启动或不可达（${apiTarget.origin}）：${error.message}`,
+        data: null,
+      }),
+    );
+  });
+
+  req.pipe(upstream);
+}
 
 async function resolveFile(urlPath) {
   const clean = decodeURIComponent(urlPath.split("?")[0]);
@@ -49,6 +89,11 @@ async function resolveFile(urlPath) {
 }
 
 const server = createServer(async (req, res) => {
+  if ((req.url || "").startsWith("/api/")) {
+    proxy(req, res);
+    return;
+  }
+
   const file = await resolveFile(req.url || "/");
   if (!file) {
     res.writeHead(403, { "content-type": "text/plain; charset=utf-8" });
@@ -70,4 +115,5 @@ const server = createServer(async (req, res) => {
 
 server.listen(port, () => {
   console.log(`AgentCareer Console → http://localhost:${port}`);
+  console.log(`/api/** → ${apiTarget.origin}`);
 });

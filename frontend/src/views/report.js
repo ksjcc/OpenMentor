@@ -1,48 +1,36 @@
 /**
  * 面试报告页。
  *
- * 数据来源：store.session.report（刚结束的那场）或 mockReport（演示）。
- * 后端 finish 接口返回的是知识提炼 JSON 字符串，这里做一次宽容解析。
+ * 数据来源：GET /api/interview/{sessionId}（真实复盘）。
+ * 进来的方式有两种：
+ * 1. 刚结束面试 → store.session.sessionId 就是这一场；
+ * 2. 从概览/列表点「查看报告」→ 会先把 sessionId 写进 store。
+ * 都没有时取最近一场已结束的面试；一场都没有就展示空状态，绝不编数据。
  */
 
+import { api } from "../api.js";
 import { store } from "../store.js";
-import { mockReport } from "../mock.js";
 import { badge, barList, esc, fmt, icon, ring, toast } from "../ui.js";
 
-function resolveReport() {
-  const raw = store.session.report;
-  if (!raw) return mockReport;
+/* ------------------------------ 数据加载 ------------------------------ */
 
-  if (typeof raw === "string") {
-    try {
-      const parsed = JSON.parse(raw);
-      return normalize(parsed);
-    } catch {
-      return { ...mockReport, summary: raw };
-    }
+async function resolveSessionId() {
+  if (store.session.sessionId) {
+    return store.session.sessionId;
   }
-  return normalize(raw);
+  const list = (await api.interviewList(store.settings.userId, 20)) || [];
+  if (!list.length) return null;
+  const finished = list.find((item) => item.status === "FINISHED");
+  return (finished || list[0]).sessionId;
 }
 
-/** 把后端可能返回的各种字段名收敛成报告页需要的形状。 */
-function normalize(raw) {
-  if (!raw || typeof raw !== "object") {
-    // finish 接口可能只返回一个纯字符串（提炼 JSON），此时退回演示报告结构
-    return mockReport;
-  }
-  return {
-    ...mockReport,
-    ...raw,
-    score: raw.score ?? mockReport.score,
-    turns: raw.turns ?? mockReport.turns,
-    dimensions:
-      Array.isArray(raw.dimensions) && raw.dimensions.length ? raw.dimensions : mockReport.dimensions,
-    strengths: raw.strengths ?? mockReport.strengths,
-    weaknesses: raw.weaknesses ?? mockReport.weaknesses,
-    flashcards: raw.flashcards ?? mockReport.flashcards,
-    summary: raw.summary ?? mockReport.summary,
-  };
+async function loadReport() {
+  const sessionId = await resolveSessionId();
+  if (!sessionId) return null;
+  return api.interviewReport(sessionId, store.settings.userId);
 }
+
+/* -------------------------------- 渲染 -------------------------------- */
 
 function listBlock(title, items, tone, iconName) {
   return `<div class="card">
@@ -63,7 +51,13 @@ function listBlock(title, items, tone, iconName) {
 }
 
 function flashcardBlock(cards) {
-  return `<div class="grid grid-3">${(cards || [])
+  if (!cards?.length) {
+    return `<div class="card"><div class="card-body"><div class="empty" style="padding:26px">
+      <div class="empty-title">本场没有生成闪卡</div>
+      <div class="empty-desc">复盘完成后，薄弱点会自动进入复习训练队列。</div>
+    </div></div></div>`;
+  }
+  return `<div class="grid grid-3">${cards
     .map(
       (card) => `<details class="card" style="overflow:hidden">
         <summary style="cursor:pointer;list-style:none;padding:16px 18px">
@@ -79,18 +73,74 @@ function flashcardBlock(cards) {
     .join("")}</div>`;
 }
 
+function transcriptBlock(messages) {
+  if (!messages?.length) return "";
+  return `<details class="card" style="margin-bottom:16px">
+    <summary style="cursor:pointer;list-style:none;padding:16px 18px">
+      <div class="row">
+        <div class="icon-box accent">${icon("interview", 15)}</div>
+        <div>
+          <div class="card-title">完整对话</div>
+          <div class="card-desc">共 ${messages.length} 条 · 展开回看当时的问答</div>
+        </div>
+        <span class="spacer"></span>
+        <span class="hint">展开</span>
+      </div>
+    </summary>
+    <div class="card-body tight" style="border-top:1px solid var(--line)">
+      <div class="list">
+        ${messages
+          .map((message) => {
+            const isAi = message.role === "ai";
+            return `<div class="list-item" style="align-items:flex-start">
+              <span class="dot ${isAi ? "ok" : ""}" style="margin-top:7px"></span>
+              <div class="li-main">
+                <div class="li-title">${isAi ? "面试官" : "我"}${
+                  !isAi && message.score != null ? ` · ${message.score} 分` : ""
+                }</div>
+                <div class="li-meta" style="white-space:pre-wrap;line-height:1.75">${esc(
+                  message.content,
+                )}</div>
+              </div>
+            </div>`;
+          })
+          .join("")}
+      </div>
+    </div>
+  </details>`;
+}
+
+function emptyPageHtml(reason) {
+  return `<div class="page-head">
+      <div>
+        <h1 class="page-title">面试报告</h1>
+        <p class="page-sub">每场面试结束后，这里会生成复盘、闪卡与下一步建议。</p>
+      </div>
+      <div class="page-actions">
+        <button class="btn btn-primary" data-go="#/interview">${icon("play", 15)}开始面试</button>
+      </div>
+    </div>
+    <div class="card"><div class="card-body">
+      <div class="empty">
+        <div class="empty-title">还没有可复盘的面试</div>
+        <div class="empty-desc">${esc(reason)}</div>
+        <button class="btn btn-primary" data-go="#/interview">去面试</button>
+      </div>
+    </div></div>`;
+}
+
 function toMarkdown(report) {
   const lines = [
-    `# 面试复盘 · ${report.topic}`,
+    `# 面试复盘 · ${report.topic || "未命名主题"}`,
     "",
-    `- 目标岗位：${report.targetRole}`,
-    `- 得分：${report.score}`,
-    `- 轮次：${report.turns}`,
+    `- 目标岗位：${report.targetRole || "—"}`,
+    `- 得分：${report.score ?? "—"}`,
+    `- 轮次：${report.turns ?? "—"}`,
     `- 时长：${fmt.dur(report.durationSec)}`,
     "",
     "## 总体评价",
     "",
-    report.summary,
+    report.summary || "—",
     "",
     "## 亮点",
     "",
@@ -117,81 +167,118 @@ function download(name, content, type = "text/markdown;charset=utf-8") {
   URL.revokeObjectURL(url);
 }
 
+function reportPageHtml(report) {
+  const passed = (report.score ?? 0) >= 75;
+  return `
+    <div class="page-head">
+      <div>
+        <h1 class="page-title">面试报告</h1>
+        <p class="page-sub">${esc(report.topic || "未命名主题")} · ${esc(
+          report.targetRole || "未填岗位",
+        )} · ${esc(fmt.date(report.startedAt || report.endedAt))}</p>
+      </div>
+      <div class="page-actions">
+        ${report.status === "IN_PROGRESS" ? badge("进行中", "accent") : badge("已结束", "ok")}
+        <button class="btn" id="export">${icon("download", 15)}导出 Markdown</button>
+        <button class="btn" data-go="#/overview">返回概览</button>
+        <button class="btn btn-primary" data-go="#/interview">${icon("play", 15)}再面一场</button>
+      </div>
+    </div>
+
+    <div class="grid grid-2-1" style="margin-bottom:16px">
+      <div class="card">
+        <div class="card-body" style="display:flex;gap:24px;align-items:center;flex-wrap:wrap">
+          <div style="width:132px">${ring((report.score ?? 0) / 100, {
+            size: 120,
+            label: "加权总分",
+          })}</div>
+          <div class="stack" style="gap:12px;flex:1;min-width:220px">
+            <div class="row">
+              ${
+                report.score == null
+                  ? badge("本场未评分", "warn")
+                  : badge(passed ? "达到目标水位" : "低于目标水位", passed ? "ok" : "warn")
+              }
+              ${badge(`${report.turns ?? 0} 轮`, "neutral")}
+              ${badge(fmt.dur(report.durationSec), "neutral")}
+              ${report.resumeTitle ? badge(`简历：${report.resumeTitle}`, "neutral") : ""}
+            </div>
+            <div style="font-size:13.5px;line-height:1.8;color:var(--ink-2)">${esc(
+              report.summary || "本场还没有生成总体评价。",
+            )}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div><div class="card-title">能力拆项</div></div></div>
+        <div class="card-body">
+          ${
+            report.dimensions?.length
+              ? barList(report.dimensions)
+              : `<div class="hint" style="line-height:1.8">本场没有留下评分明细。回答得越具体，这里越完整。</div>`
+          }
+        </div>
+      </div>
+    </div>
+
+    ${transcriptBlock(report.messages)}
+
+    <div class="grid grid-2" style="margin-bottom:16px">
+      ${listBlock("做得好的地方", report.strengths, "ok", "check")}
+      ${listBlock("需要补的地方", report.weaknesses, "warn", "warn")}
+    </div>
+
+    <div class="stack" style="gap:12px;margin-bottom:16px">
+      <div class="row">
+        <h2 style="font-size:15px">复习闪卡</h2>
+        <span class="hint">已写入长期记忆，到期后进入今日复习</span>
+      </div>
+      ${flashcardBlock(report.flashcards)}
+    </div>
+
+    <div class="card">
+      <div class="card-head"><div>
+        <div class="card-title">下一步</div>
+        <div class="card-desc">基于本场薄弱点与复盘的训练建议</div>
+      </div></div>
+      <div class="card-body stack" style="gap:12px">
+        ${
+          report.nextPlan?.length
+            ? `<div class="hint" style="line-height:1.8">${report.nextPlan
+                .map((item) => `· ${esc(item)}`)
+                .join("<br>")}</div>`
+            : `<div class="hint" style="line-height:1.8">建议围绕「${esc(
+                (report.weaknesses?.[0] || "本场薄弱点").slice(0, 18),
+              )}」再面一场，让面试官连续追问三层落地细节。</div>`
+        }
+        <div class="row">
+          <button class="btn btn-primary" data-go="#/interview">开始专项面试 ${icon("chevron", 13)}</button>
+          <button class="btn" data-go="#/review">去复习训练</button>
+          <button class="btn" data-go="#/memory">查看长期记忆</button>
+        </div>
+      </div>
+    </div>`;
+}
+
 export default {
   id: "report",
   title: "面试报告",
 
   async render() {
-    const report = resolveReport();
-    const passed = report.score >= 75;
+    let report = null;
+    let failure = null;
+    try {
+      report = await loadReport();
+    } catch (error) {
+      failure = error;
+    }
 
-    const html = `
-      <div class="page-head">
-        <div>
-          <h1 class="page-title">面试报告</h1>
-          <p class="page-sub">${esc(report.topic)} · ${esc(report.targetRole)} · ${esc(
-            fmt.date(report.startedAt),
-          )}</p>
-        </div>
-        <div class="page-actions">
-          <button class="btn" id="export">${icon("download", 15)}导出 Markdown</button>
-          <button class="btn" data-go="#/overview">返回概览</button>
-          <button class="btn btn-primary" data-go="#/interview">${icon("play", 15)}再面一场</button>
-        </div>
-      </div>
-
-      <div class="grid grid-2-1" style="margin-bottom:16px">
-        <div class="card">
-          <div class="card-body" style="display:flex;gap:24px;align-items:center;flex-wrap:wrap">
-            <div style="width:132px">${ring(report.score / 100, { size: 120, label: "加权总分" })}</div>
-            <div class="stack" style="gap:12px;flex:1;min-width:220px">
-              <div class="row">
-                ${badge(passed ? "达到目标水位" : "低于目标水位", passed ? "ok" : "warn")}
-                ${badge(`${report.turns} 轮`, "neutral")}
-                ${badge(fmt.dur(report.durationSec), "neutral")}
-              </div>
-              <div style="font-size:13.5px;line-height:1.8;color:var(--ink-2)">${esc(report.summary)}</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-head"><div><div class="card-title">能力拆项</div></div></div>
-          <div class="card-body">${barList(report.dimensions)}</div>
-        </div>
-      </div>
-
-      <div class="grid grid-2" style="margin-bottom:16px">
-        ${listBlock("做得好的地方", report.strengths, "ok", "check")}
-        ${listBlock("需要补的地方", report.weaknesses, "warn", "warn")}
-      </div>
-
-      <div class="stack" style="gap:12px;margin-bottom:16px">
-        <div class="row">
-          <h2 style="font-size:15px">复习闪卡</h2>
-          <span class="hint">已写入长期记忆，到期后进入今日复习</span>
-        </div>
-        ${flashcardBlock(report.flashcards)}
-      </div>
-
-      <div class="card">
-        <div class="card-head"><div>
-          <div class="card-title">下一步</div>
-          <div class="card-desc">基于本场薄弱点推荐</div>
-        </div></div>
-        <div class="card-body stack" style="gap:12px">
-          <div class="hint">
-            本场最明显的缺口是把结论停在概念层。建议下一场直接面试
-            「${esc(report.weaknesses?.[0]?.slice(0, 18) || "薄弱点")}」相关主题，
-            让面试官连续追问三层落地细节。
-          </div>
-          <div class="row">
-            <button class="btn btn-primary" data-go="#/interview">开始专项面试 ${icon("chevron", 13)}</button>
-            <button class="btn" data-go="#/memory">查看长期记忆</button>
-          </div>
-        </div>
-      </div>
-    `;
+    const html = report
+      ? reportPageHtml(report)
+      : emptyPageHtml(
+          failure ? `复盘加载失败：${failure.message}` : "完成一场模拟面试后，这里会自动生成复盘。",
+        );
 
     return {
       html,
@@ -202,7 +289,8 @@ export default {
           });
         });
         root.querySelector("#export")?.addEventListener("click", () => {
-          download(`面试复盘-${report.topic}.md`, toMarkdown(report));
+          if (!report) return;
+          download(`面试复盘-${report.topic || "面试"}.md`, toMarkdown(report));
           toast("已导出 Markdown", "ok");
         });
       },

@@ -5,6 +5,8 @@ import com.ai.agent.ResumeProfileAgent;
 import com.ai.prompt.PromptBuilder;
 import com.ai.prompt.PromptContext;
 import com.ai.prompt.PromptTemplates;
+import com.common.BizException;
+import com.common.ErrorCode;
 import com.dto.profile.ProfileInitRequest;
 import com.entity.MemoryProfileJson;
 import com.entity.UserProfile;
@@ -51,7 +53,10 @@ public class ProfileService {
                 .task(PromptTemplates.TASK_PROFILE)
                 .build());
         String normalized = normalizeInitialProfile(agentInput);
-        String profileJson = resumeProfileAgent.parseProfile((String) normalized);
+        String profileJson = resumeProfileAgent.parseProfile(normalized);
+        if (profileJson == null || profileJson.isBlank()) {
+            throw new BizException(ErrorCode.INTERNAL_ERROR, "简历解析没有返回内容，请稍后重试");
+        }
         saveOrUpdateUserProfile(request.getUserId(), normalized, request.getResumeText());
         memoryService.saveProfileJson(
                 request.getUserId(),
@@ -72,7 +77,12 @@ public class ProfileService {
 
     private String normalizeInitialProfile(
             String profile) {
-        return new String();
+        // 这里拿到的是已经拼好的画像解析 prompt，原样传给 agent。
+        // （历史实现返回了 new String()，等于把 prompt 清空，导致解析必然失败。）
+        if (profile == null || profile.isBlank()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "简历内容为空，无法解析画像");
+        }
+        return profile.trim();
     }
 
     private void saveOrUpdateUserProfile(Long userId, String profileJson, String resumeText) {
@@ -187,5 +197,30 @@ public class ProfileService {
                 new LambdaQueryWrapper<UserProfile>()
                         .eq(UserProfile::getUserId, userId)
                         .last("LIMIT 1"));
+    }
+
+    /**
+     * 同步简历库里的简历正文到画像。
+     *
+     * <p>
+     * 画像记录还不存在时会先建一条最小记录，这样用户在简历库里加完简历，
+     * 「记忆与画像」页和面试的后处理链路马上就能用到这份文本。
+     */
+    public void syncResumeText(Long userId, String resumeText) {
+        if (userId == null || resumeText == null || resumeText.isBlank()) {
+            return;
+        }
+        UserProfile existing = getProfile(userId);
+        if (existing == null) {
+            UserProfile created = new UserProfile();
+            created.setUserId(userId);
+            created.setResumeText(resumeText);
+            userProfileMapper.insert(created);
+            return;
+        }
+        UserProfile patch = new UserProfile();
+        patch.setId(existing.getId());
+        patch.setResumeText(resumeText);
+        userProfileMapper.updateById(patch);
     }
 }

@@ -2,6 +2,12 @@ spring:
   application:
     name: agent-career
 
+  servlet:
+    multipart:
+      # 简历文件（pdf/docx）通常几百 KB，留出余量
+      max-file-size: 10MB
+      max-request-size: 12MB
+
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:career_mind}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
@@ -84,3 +90,21 @@ graphrag:
     graph-hop: 2
     chunk-limit: 12
     llm-calls: 2
+interview:
+  guard:
+    # 单实例同时进行的 harness 调用上限，按模型侧并发配额 / CPU 核数定
+    max-concurrent: 16
+    # 拿不到并发许可时最多等多久，超过就直接降级（面试场景不建议长排队）
+    concurrency-wait-ms: 200
+  breaker:
+    window-size: 20          # 滑动窗口
+    min-samples: 8           # 样本不足不熔断，避免冷启动误判
+    failure-rate: 0.5        # 失败率超过 50%
+    open-duration-ms: 30000  # 打开 30 秒后放一个探测请求
+  idempotency:
+    # 在途锁 TTL：要覆盖"创建 + 出第一题"的最长耗时（含模型调用）
+    lock-ttl-seconds: 60
+    # 显式 Idempotency-Key 的结果缓存：可安全放长
+    explicit-result-ttl-seconds: 300
+    # 无键时按参数哈希去重：只覆盖连点
+    implicit-result-ttl-seconds: 10

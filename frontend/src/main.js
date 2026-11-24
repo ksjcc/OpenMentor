@@ -2,38 +2,55 @@
  * 应用入口：外壳、路由、主题。
  *
  * 路由用 hash，不依赖任何 router 库；每个视图模块导出 { title, subtitle, render }。
+ * 面向终端用户（To C），外壳里不出现任何后端/连接相关信息。
  */
 
 import { store, applyAppearance } from "./store.js";
-import { api } from "./api.js";
 import { icon, esc, toast } from "./ui.js";
 
 import overview from "./views/overview.js";
 import interview from "./views/interview.js";
 import report from "./views/report.js";
+import review from "./views/review.js";
 import knowledge from "./views/knowledge.js";
 import memory from "./views/memory.js";
+import resume from "./views/resume.js";
 import settings from "./views/settings.js";
 
-const VIEWS = { overview, interview, report, knowledge, memory, settings };
+const VIEWS = { overview, interview, report, review, knowledge, memory, resume, settings };
 
 const NAV = [
   { group: "工作台", items: [{ id: "overview", label: "概览" }] },
-  { group: "面试", items: [{ id: "interview", label: "模拟面试" }, { id: "report", label: "面试报告" }] },
-  { group: "知识与记忆", items: [{ id: "knowledge", label: "知识图谱" }, { id: "memory", label: "记忆与画像" }] },
+  {
+    group: "面试",
+    items: [
+      { id: "resume", label: "简历库" },
+      { id: "interview", label: "模拟面试" },
+      { id: "report", label: "面试报告" },
+    ],
+  },
+  {
+    group: "训练与知识",
+    items: [
+      { id: "review", label: "复习训练" },
+      { id: "knowledge", label: "知识图谱" },
+      { id: "memory", label: "记忆与画像" },
+    ],
+  },
 ];
 
 const NAV_ICONS = {
   overview: "overview",
   interview: "interview",
   report: "report",
+  review: "clock",
   knowledge: "knowledge",
   memory: "memory",
+  resume: "resume",
   settings: "settings",
 };
 
 let currentView = null;
-let healthTimer = null;
 
 /* ------------------------------- shell -------------------------------- */
 
@@ -59,15 +76,11 @@ function shellHtml() {
           <div class="brand-mark">AC</div>
           <div class="brand-text">
             <div class="brand-name">AgentCareer</div>
-            <div class="brand-sub">Harness Console</div>
+            <div class="brand-sub">AI 面试教练</div>
           </div>
         </div>
         ${nav}
         <div class="sidebar-foot">
-          <div class="health" id="health">
-            <span class="dot" id="health-dot"></span>
-            <span id="health-text">正在检测后端…</span>
-          </div>
           <button class="nav-item" data-route="#/settings" type="button">
             ${icon(NAV_ICONS.settings)}
             <span>设置</span>
@@ -83,7 +96,6 @@ function shellHtml() {
             <strong id="crumb">概览</strong>
           </div>
           <div class="topbar-right">
-            <span class="badge badge-warn" id="demo-badge" hidden>演示数据</span>
             <button class="btn btn-ghost btn-sm" id="theme-toggle" type="button"
               title="切换主题" aria-label="切换主题">${icon("moon", 15)}</button>
             <div class="user-chip">
@@ -147,32 +159,6 @@ async function mountRoute() {
   }
 }
 
-/* ------------------------------ health -------------------------------- */
-
-async function refreshHealth() {
-  const dot = document.getElementById("health-dot");
-  const text = document.getElementById("health-text");
-  const badge = document.getElementById("demo-badge");
-  if (!dot || !text) return;
-
-  if (store.settings.demo) {
-    dot.className = "dot warn";
-    text.textContent = "演示模式";
-    badge.hidden = false;
-    return;
-  }
-
-  badge.hidden = true;
-  try {
-    await api.ping();
-    dot.className = "dot ok";
-    text.textContent = "后端已连接";
-  } catch {
-    dot.className = "dot err";
-    text.textContent = "后端未连接";
-  }
-}
-
 /* ------------------------------- boot --------------------------------- */
 
 function boot() {
@@ -198,19 +184,14 @@ function boot() {
   });
 
   document.getElementById("user-avatar").textContent = "候";
-  document.getElementById("user-label").textContent = `候选人 · #${store.settings.userId}`;
 
   store.subscribe(() => {
-    document.getElementById("user-label").textContent = `候选人 · #${store.settings.userId}`;
-    refreshHealth();
+    applyAppearance();
+    syncThemeButton();
   });
 
   window.addEventListener("hashchange", mountRoute);
   if (!location.hash) location.hash = "#/overview";
-
-  refreshHealth();
-  healthTimer = setInterval(refreshHealth, 30000);
-  window.addEventListener("beforeunload", () => clearInterval(healthTimer));
 
   mountRoute().catch((error) => {
     console.error(error);

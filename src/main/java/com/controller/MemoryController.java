@@ -71,4 +71,11 @@ public class MemoryController {
                             @RequestParam String keyword) {
         return Result.success(memoryService.searchRelevantChunks(userId, keyword, 5));
     }
+
+    @GetMapping("/recent")
+    @Operation(summary = "最近写入的记忆片段")
+    public Result<?> recent(@RequestParam Long userId,
+                            @RequestParam(required = false) Integer limit) {
+        return Result.success(memoryService.recentChunks(userId, limit));
+    }
 }

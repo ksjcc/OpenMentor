@@ -36,12 +36,12 @@
     "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --mono: "SFMono-Regular", ui-monospace, "JetBrains Mono", Consolas, monospace;
 
-  /* 尺寸 */
-  --r-xs: 6px;
-  --r-sm: 9px;
-  --r-md: 12px;
-  --r-lg: 16px;
-  --r-xl: 22px;
+  /* 尺寸：企业控制台偏方正，圆角收敛到 4–14px */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 10px;
+  --r-xl: 14px;
   --sidebar-w: 248px;
   --topbar-h: 60px;
 
@@ -198,13 +198,13 @@ button {
   place-items: center;
   width: 30px;
   height: 30px;
-  border-radius: 9px;
-  background: linear-gradient(160deg, var(--accent), var(--accent-ink));
+  border-radius: var(--r-sm);
+  background: var(--accent);
   color: #fff;
   font-weight: 700;
-  font-size: 13px;
-  letter-spacing: -0.03em;
-  box-shadow: var(--shadow-1);
+  font-size: 12.5px;
+  letter-spacing: -0.02em;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
 }
 
 .brand-name {
@@ -282,15 +282,6 @@ button {
   border-top: 1px solid var(--line);
   display: grid;
   gap: 6px;
-}
-
-.health {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  font-size: 12px;
-  color: var(--ink-3);
 }
 
 .dot {
@@ -1481,5 +1472,131 @@ table.data td.strong {
   *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* ==========================================================================
+   企业化收敛层
+   目标：更方的圆角、更密的信息、更明确的区块层级、可打印的报告。
+   ========================================================================== */
+
+/* ---------------------------- 页面头分隔 ---------------------------- */
+.page-head {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 20px;
+}
+
+.page-title {
+  font-size: 20px;
+  letter-spacing: -0.025em;
+}
+
+.page-sub {
+  margin-top: 4px;
+  font-size: 12.5px;
+}
+
+/* ---------------------------- 分段标题 ------------------------------ */
+.section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 22px 0 12px;
+}
+.section-head h2 {
+  font-size: 14px;
+  font-weight: 620;
+}
+.section-head .hint {
+  margin-left: auto;
+}
+
+/* ---------------------------- 密度更高的表 -------------------------- */
+table.data.dense th {
+  padding: 8px 16px;
+  font-size: 11px;
+}
+table.data.dense td {
+  padding: 9px 16px;
+  font-size: 12.5px;
+}
+table.data td.num,
+table.data th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------- 键位提示 ------------------------------ */
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--line-2);
+  border-bottom-width: 2px;
+  border-radius: var(--r-xs);
+  background: var(--surface-2);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+
+/* ---------------------------- 细节点 -------------------------------- */
+summary::-webkit-details-marker {
+  display: none;
+}
+details > summary {
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+}
+details > summary:hover {
+  background: var(--surface-2);
+}
+details[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.card-head + .card-body.tight > .list > .list-item:first-child {
+  border-top: none;
+}
+
+/* 数值强调：企业报表里数字要比文字重 */
+.stat-value,
+.ring-value {
+  font-feature-settings: "tnum" 1, "ss01" 1;
+}
+
+/* ---------------------------- 打印报告 ------------------------------ */
+@media print {
+  .sidebar,
+  .topbar,
+  .page-actions,
+  .toasts,
+  .composer {
+    display: none !important;
+  }
+  .app {
+    grid-template-columns: 1fr;
+  }
+  .view {
+    padding: 0;
+    max-width: none;
+  }
+  .card,
+  .stat {
+    box-shadow: none;
+    border-color: #d0d3da;
+    break-inside: avoid;
+  }
+  body {
+    background: #fff;
+    color: #000;
+  }
+  .page-head {
+    border-bottom-color: #d0d3da;
+  }
+  a {
+    color: inherit;
+    text-decoration: none;
   }
 }

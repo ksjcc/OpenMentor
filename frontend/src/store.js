@@ -3,15 +3,16 @@
  *
  * 只持久化"用户偏好"，不持久化正在进行的面试 —— 面试状态的真身在服务端
  * （RuntimeContext + Session），前端重复存一份必然不一致。
+ *
+ * 面向 To C 用户：这里不保存任何连接信息（后端地址 / 演示开关），
+ * 所有请求都打同源接口。
  */
 
 const STORAGE_KEY = "agentcareer.console.v1";
 
 const DEFAULTS = {
-  // 连接
-  baseUrl: "http://localhost:8080",
+  // 当前用户。接入登录后由会话颁发，不再由用户手填。
   userId: 1,
-  demo: true,
 
   // 外观
   theme: "light",
@@ -24,11 +25,19 @@ const DEFAULTS = {
   projectSummary: "",
 };
 
+/** 只保留 DEFAULTS 里认识的键，历史版本残留的 baseUrl / demo 会被丢掉。 */
+function sanitize(raw) {
+  if (!raw || typeof raw !== "object") return { ...DEFAULTS };
+  const clean = { ...DEFAULTS };
+  for (const key of Object.keys(DEFAULTS)) {
+    if (raw[key] !== undefined && raw[key] !== null) clean[key] = raw[key];
+  }
+  return clean;
+}
+
 function load() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { ...DEFAULTS };
-    return { ...DEFAULTS, ...JSON.parse(raw) };
+    return sanitize(JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"));
   } catch {
     return { ...DEFAULTS };
   }

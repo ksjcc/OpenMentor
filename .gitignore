@@ -1,6 +1,7 @@
 target/
 out/
 .env
+.home/
 .idea/
 .vscode/
 *.iml

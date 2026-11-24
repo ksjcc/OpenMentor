@@ -5,8 +5,11 @@ import com.dto.dashboard.DashboardDTO;
 import com.dto.graph.GraphDTO;
 import com.dto.graph.GraphLinkDTO;
 import com.dto.graph.GraphNodeDTO;
+import com.dto.interview.InterviewReportDTO;
+import com.dto.interview.InterviewSummaryDTO;
 import com.entity.Flashcard;
 import com.entity.MemoryChunk;
+import com.entity.Resume;
 import com.service.InterviewService;
 import com.service.KnowledgeQaService;
 import com.service.KnowledgeGraphService;
@@ -14,6 +17,7 @@ import com.service.MemoryService;
 import com.service.ReviewService;
 import com.service.Dashboard.DashboardService;
 import com.service.Dashboard.FlashcardService;
+import com.service.resume.ResumeService;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -63,6 +67,9 @@ class ApiSmokeTest {
   @Mock
   private KnowledgeQaService knowledgeQaService;
 
+  @Mock
+  private ResumeService resumeService;
+
   @BeforeEach
   void setUp() {
     mockMvc = MockMvcBuilders.standaloneSetup(
@@ -71,7 +78,8 @@ class ApiSmokeTest {
         new ReviewController(reviewService, flashcardService),
         new DashboardController(dashboardService),
         new KnowledgeGraphController(knowledgeGraphService),
-        new MemoryController(memoryService))
+        new MemoryController(memoryService),
+        new ResumeController(resumeService))
         .build();
   }
 
@@ -79,7 +87,7 @@ class ApiSmokeTest {
   void startInterviewRunsThrough() throws Exception {
     SseEmitter emitter = new SseEmitter();
     emitter.complete();
-    when(interviewService.startInterviewStream(1L, "TECH", "Java后端开发", "Redis", null))
+    when(interviewService.startInterviewStream(1L, "TECH", "Java后端开发", "Redis", null, null, null))
         .thenReturn(emitter);
 
     var mvcResult = mockMvc.perform(post("/api/interview/start")
@@ -92,6 +100,71 @@ class ApiSmokeTest {
 
     mockMvc.perform(asyncDispatch(mvcResult))
         .andExpect(status().isOk());
+  }
+
+  @Test
+  void startInterviewPassesResumeIdAndIdempotencyKey() throws Exception {
+    SseEmitter emitter = new SseEmitter();
+    emitter.complete();
+    when(interviewService.startInterviewStream(1L, "TECH", "Java后端开发", "Redis", null, 7L, "idem-1"))
+        .thenReturn(emitter);
+
+    var mvcResult = mockMvc.perform(post("/api/interview/start")
+        .header("Idempotency-Key", "idem-1")
+        .param("userId", "1")
+        .param("interviewType", "TECH")
+        .param("targetRole", "Java后端开发")
+        .param("topic", "Redis")
+        .param("resumeId", "7"))
+        .andExpect(request().asyncStarted())
+        .andReturn();
+
+    mockMvc.perform(asyncDispatch(mvcResult))
+        .andExpect(status().isOk());
+  }
+
+  @Test
+  void interviewListAndReportRunThrough() throws Exception {
+    InterviewSummaryDTO summary = new InterviewSummaryDTO();
+    summary.setSessionId(10L);
+    summary.setTopic("Redis 持久化");
+    summary.setStatus("FINISHED");
+    summary.setScore(82);
+    when(interviewService.listInterviews(1L, null)).thenReturn(List.of(summary));
+
+    InterviewReportDTO report = new InterviewReportDTO();
+    report.setSessionId(10L);
+    report.setTopic("Redis 持久化");
+    report.setScore(82);
+    report.setSummary("整体稳定");
+    when(interviewService.getInterviewReport(1L, 10L)).thenReturn(report);
+
+    mockMvc.perform(get("/api/interview")
+        .param("userId", "1"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data[0].sessionId").value(10))
+        .andExpect(jsonPath("$.data[0].score").value(82));
+
+    mockMvc.perform(get("/api/interview/{sessionId}", 10L)
+        .param("userId", "1"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.summary").value("整体稳定"));
+  }
+
+  @Test
+  void resumeListRunsThrough() throws Exception {
+    Resume resume = new Resume();
+    resume.setId(3L);
+    resume.setUserId(1L);
+    resume.setTitle("Java 后端 · 2026 春招");
+    resume.setIsDefault(1);
+    when(resumeService.listForDisplay(1L)).thenReturn(List.of(resume));
+
+    mockMvc.perform(get("/api/resume")
+        .param("userId", "1"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data[0].title").value("Java 后端 · 2026 春招"))
+        .andExpect(jsonPath("$.data[0].isDefault").value(1));
   }
 
   @Test

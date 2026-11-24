@@ -8,6 +8,7 @@ import com.entity.InterviewSession;
 import com.entity.UserProfile;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mapper.FlashcardMapper;
+import com.mapper.InterviewMessageMapper;
 import com.mapper.InterviewSessionMapper;
 import com.mapper.MemoryProfileJsonMapper;
 import com.mapper.UserProfileMapper;
@@ -38,6 +39,9 @@ class DashboardServiceTest {
   private InterviewSessionMapper interviewSessionMapper;
 
   @Mock
+  private InterviewMessageMapper interviewMessageMapper;
+
+  @Mock
   private FlashcardMapper flashcardMapper;
 
   @Mock
@@ -62,6 +66,8 @@ class DashboardServiceTest {
     session.setId(10L);
     session.setStatus("FINISHED");
     session.setTargetRole("Java后端开发");
+    session.setTopic("Redis 持久化");
+    session.setScore(82);
     session.setSummary("""
         {
           "summary": "本次面试暴露出 Redis 一致性和 JVM GC 的短板",
@@ -74,6 +80,7 @@ class DashboardServiceTest {
 
     when(userProfileMapper.selectOne(any())).thenReturn(profile);
     when(interviewSessionMapper.selectList(any())).thenReturn(List.of(session));
+    when(interviewSessionMapper.selectCount(any())).thenReturn(3L);
     when(flashcardMapper.selectCount(any())).thenReturn(0L);
     WeaknessDTO jvmWeakness = new WeaknessDTO();
     jvmWeakness.setName("JVM GC");
@@ -95,6 +102,7 @@ class DashboardServiceTest {
         memoryProfileJsonMapper,
         userProfileMapper,
         interviewSessionMapper,
+        interviewMessageMapper,
         flashcardMapper,
         learningRecommendationService,
         new ObjectMapper(),
@@ -113,6 +121,11 @@ class DashboardServiceTest {
             org.assertj.core.groups.Tuple.tuple("Redis缓存一致性", 7),
             org.assertj.core.groups.Tuple.tuple("JVM GC", 3));
     assertThat(dashboard.getTodayReviewCount()).isZero();
+    assertThat(dashboard.getTotalSessions()).isEqualTo(3);
+    assertThat(dashboard.getAverageScore()).isEqualTo(82);
+    assertThat(dashboard.getScoreTrend()).containsExactly(82);
+    assertThat(dashboard.getRecentInterviews()).hasSize(1);
+    assertThat(dashboard.getRecentInterviews().get(0).getTopic()).isEqualTo("Redis 持久化");
     assertThat(dashboard.getAiSuggestions())
         .isNotEmpty()
         .first()

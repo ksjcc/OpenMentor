@@ -271,3 +271,60 @@ export function mockInterviewScript(topic) {
     { delay: 120, event: "complete", data: "done" },
   ];
 }
+
+/* ------------------------------- 复习训练 ------------------------------ */
+
+export const mockReview = {
+  today: {
+    due: 9,
+    done: 4,
+    accuracy: 0.78,
+    streak: 6,
+    cards: [
+      {
+        id: 9001,
+        tag: "Redis",
+        question: "主从切换时，如何降低异步复制造成的数据丢失？",
+        answer:
+          "写入侧设置 min-replicas-to-write 与 min-replicas-max-lag，保证至少 N 个从节点在 M 秒内确认；同时接受「极端情况下仍可能丢」这个前提，用业务幂等或对账兜底。",
+      },
+      {
+        id: 9002,
+        tag: "Redis",
+        question: "AOF 重写为什么不会阻塞主线程？",
+        answer:
+          "重写由子进程基于当时快照完成，重写期间的新写命令同时写入 AOF 缓冲与重写缓冲，结束后刷入新文件并原子替换；阻塞点在于替换瞬间与 fsync 策略。",
+      },
+      {
+        id: 9003,
+        tag: "分布式锁",
+        question: "锁续期和业务超时应该怎么配合？",
+        answer:
+          "续期周期必须显著小于锁 TTL（一般 1/3），且业务侧要有最大执行时长兜底；不能用无限续期，否则进程假死会永久持锁。",
+      },
+      {
+        id: 9004,
+        tag: "MySQL",
+        question: "联合索引在范围查询后面失效的原因是什么？",
+        answer:
+          "范围条件之后的列无法继续用于定位，只能回表过滤；因此把等值条件放前、范围条件放后，或为范围列单独建索引。",
+      },
+      {
+        id: 9005,
+        tag: "JVM",
+        question: "G1 的 Mixed GC 在什么条件下触发？",
+        answer:
+          "当老年代占用超过 InitiatingHeapOccupancyPercent 阈值时触发并发标记，标记完成后按回收价值挑选若干 Old Region 加入 Mixed GC 一起回收。",
+      },
+    ],
+  },
+  plan: {
+    weakTopics: ["并发与锁", "G1 / Mixed GC", "索引代价估算"],
+    reviewOrder: ["并发与锁", "索引代价估算", "G1 / Mixed GC"],
+    roleGapSuggestions: [
+      "目标岗位要求高并发场景设计经验，建议优先补「分布式锁 + 幂等」专项",
+      "索引优化只答到「加索引」，建议补执行计划与回表代价的量化估算",
+    ],
+    learningPlan: null,
+  },
+};

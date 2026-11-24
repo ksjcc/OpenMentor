@@ -1,38 +1,27 @@
 /**
- * 概览页。所有数据都尽量取后端，取不到就落到演示数据，
- * 页面顶部会通过"演示数据"标记告诉使用者当前是哪种来源。
+ * 概览页。
+ *
+ * 全部数据来自 GET /api/dashboard（真实会话、画像、闪卡）。
+ * 后端没数据时展示空状态，不再回落样例数据。
  */
 
 import { api } from "../api.js";
 import { store } from "../store.js";
-import { mockDashboard } from "../mock.js";
-import {
-  areaChart,
-  badge,
-  barList,
-  esc,
-  fmt,
-  icon,
-  ring,
-  toast,
-} from "../ui.js";
+import { areaChart, badge, barList, esc, fmt, icon } from "../ui.js";
 
-function statCard(label, value, unit, delta, iconName) {
-  const dir = delta > 0.001 ? "up" : delta < -0.001 ? "down" : "flat";
-  const arrow = dir === "up" ? "arrowUp" : dir === "down" ? "arrowDown" : "minus";
-  const deltaText =
-    dir === "flat" ? "持平" : `${dir === "up" ? "+" : ""}${(delta * 100).toFixed(0)}%`;
+function statCard(label, value, unit, iconName, hint) {
   return `<div class="stat">
     <div class="stat-label">${icon(iconName, 14)}<span>${esc(label)}</span></div>
     <div class="stat-value">${esc(value)}${unit ? `<span class="stat-unit">${esc(unit)}</span>` : ""}</div>
-    <div class="stat-delta ${dir}">${icon(arrow, 13)}<span>${deltaText}</span><span style="color:var(--ink-4)">较上周</span></div>
+    <div class="stat-delta flat"><span style="color:var(--ink-4)">${esc(hint)}</span></div>
   </div>`;
 }
 
 function recentTable(rows) {
   if (!rows.length) {
     return `<div class="card-body"><div class="empty"><div class="empty-title">还没有面试记录</div>
-      <div class="empty-desc">开始第一场模拟面试后，这里会出现每场的得分与薄弱点。</div></div></div>`;
+      <div class="empty-desc">开始第一场模拟面试后，这里会出现每场的得分与薄弱点。</div>
+      <button class="btn btn-primary" data-go="#/interview">开始面试</button></div></div>`;
   }
   return `<div class="table-wrap"><table class="data">
     <thead><tr>
@@ -41,15 +30,20 @@ function recentTable(rows) {
     <tbody>
       ${rows
         .map((row) => {
-          const tone = row.score >= 80 ? "ok" : row.score >= 70 ? "warn" : "danger";
+          const score = row.score;
+          const tone = score == null ? "neutral" : score >= 80 ? "ok" : score >= 70 ? "warn" : "danger";
           return `<tr>
-            <td class="strong">${esc(row.topic)}</td>
-            <td>${esc(row.targetRole)}</td>
-            <td class="num">${row.turns}</td>
-            <td>${badge(`${row.score} 分`, tone)}</td>
-            <td>${row.weak?.length ? esc(row.weak[0]) : `<span style="color:var(--ink-4)">—</span>`}</td>
-            <td style="white-space:nowrap">${esc(fmt.rel(row.at))}</td>
-            <td><button class="btn btn-ghost btn-sm" data-report="${row.id}">查看报告</button></td>
+            <td class="strong">${esc(row.topic || "未命名主题")}</td>
+            <td>${esc(row.targetRole || "—")}</td>
+            <td class="num">${row.turns ?? 0}</td>
+            <td>${score == null ? badge("未评分", "neutral") : badge(`${score} 分`, tone)}</td>
+            <td>${
+              row.topWeakness
+                ? esc(row.topWeakness)
+                : `<span style="color:var(--ink-4)">—</span>`
+            }</td>
+            <td style="white-space:nowrap">${esc(fmt.rel(row.endedAt || row.createdAt))}</td>
+            <td><button class="btn btn-ghost btn-sm" data-report="${row.sessionId}">查看报告</button></td>
           </tr>`;
         })
         .join("")}
@@ -57,55 +51,47 @@ function recentTable(rows) {
   </table></div>`;
 }
 
-function weakList(items) {
+function weaknessList(items) {
   if (!items.length) {
     return `<div class="empty"><div class="empty-title">暂无薄弱点</div>
-      <div class="empty-desc">继续面试，系统会从追问与评分里沉淀薄弱知识点。</div></div>`;
+      <div class="empty-desc">完成几场面试后，系统会从追问与评分里沉淀薄弱知识点。</div></div>`;
   }
+  const max = Math.max(...items.map((item) => item.count || 1), 1);
   return `<div class="list">${items
-    .map((item) => {
-      const tone = item.score >= 75 ? "ok" : item.score >= 60 ? "warn" : "danger";
-      const arrow = item.trend === "up" ? "arrowUp" : item.trend === "down" ? "arrowDown" : "minus";
-      return `<div class="list-item">
-        <div class="icon-box ${tone === "danger" ? "" : "accent"}">${icon("target", 15)}</div>
-        <div class="li-main">
-          <div class="li-title">${esc(item.topic)}</div>
-          <div class="li-meta">被追问 ${item.count} 次 · 平均 ${item.score} 分</div>
-        </div>
-        <div style="width:96px"><div class="bar ${tone}"><i style="width:${item.score}%"></i></div></div>
-        <span style="color:var(--ink-3);display:flex">${icon(arrow, 14)}</span>
-      </div>`;
-    })
-    .join("")}</div>`;
-}
-
-function suggestionCards(items) {
-  return `<div class="grid grid-3">${items
     .map(
-      (item) => `<div class="card"><div class="card-body stack" style="gap:10px">
-        <div class="row">${badge(item.tag, item.tone === "accent" ? "accent" : item.tone)}</div>
-        <div style="font-size:14px;font-weight:600;letter-spacing:-0.01em">${esc(item.title)}</div>
-        <div class="hint">${esc(item.desc)}</div>
-        <button class="btn btn-sm" data-start-topic="${esc(item.topic)}">${esc(item.action)}
-          ${icon("chevron", 13)}</button>
-      </div></div>`,
+      (item) => `<div class="list-item">
+        <div class="icon-box ${item.count >= 3 ? "" : "accent"}">${icon("target", 15)}</div>
+        <div class="li-main">
+          <div class="li-title">${esc(item.name)}</div>
+          <div class="li-meta">被追问 ${item.count} 次</div>
+        </div>
+        <div style="width:96px"><div class="bar ${item.count >= 3 ? "danger" : "warn"}"><i
+          style="width:${Math.round((item.count / max) * 100)}%"></i></div></div>
+      </div>`,
     )
     .join("")}</div>`;
 }
 
-async function loadDashboard() {
-  if (store.settings.demo) return mockDashboard;
-  try {
-    const raw = await api.dashboard();
-    // 后端 DTO 字段可能和演示数据结构不同：缺关键字段就退回演示数据，避免半张空页面
-    if (!raw || !raw.kpis || !raw.trend) {
-      return { ...mockDashboard, __partial: true };
-    }
-    return raw;
-  } catch (error) {
-    toast(`概览数据加载失败：${error.message}`, "warn");
-    return mockDashboard;
+function suggestionCards(items, weakTopics) {
+  if (!items.length) {
+    return `<div class="card"><div class="card-body"><div class="empty" style="padding:24px">
+      <div class="empty-title">还没有建议</div>
+      <div class="empty-desc">完成一场面试并生成复盘后，这里会给出下一步的训练方向。</div>
+      <button class="btn btn-primary" data-go="#/interview">开始面试</button>
+    </div></div></div>`;
   }
+  const topic = weakTopics[0] || "";
+  return `<div class="grid grid-3">${items
+    .map(
+      (text, index) => `<div class="card"><div class="card-body stack" style="gap:10px">
+        <div class="row">${badge(index === 0 ? "优先" : "建议", index === 0 ? "warn" : "accent")}</div>
+        <div class="hint" style="line-height:1.75">${esc(text)}</div>
+        <button class="btn btn-sm" data-start-topic="${esc(topic || "")}">
+          去练习 ${icon("chevron", 13)}
+        </button>
+      </div></div>`,
+    )
+    .join("")}</div>`;
 }
 
 export default {
@@ -113,19 +99,51 @@ export default {
   title: "概览",
 
   async render() {
-    const data = await loadDashboard();
-    const k = data.kpis;
-    const trend = data.trend;
-    const review = data.review || mockDashboard.review;
+    let data = null;
+    let failure = null;
+    try {
+      data = await api.dashboard(store.settings.userId);
+    } catch (error) {
+      failure = error;
+    }
+
+    if (!data) {
+      return {
+        html: `<div class="page-head">
+            <div>
+              <h1 class="page-title">概览</h1>
+              <p class="page-sub">你的面试表现与待补强的知识点。</p>
+            </div>
+          </div>
+          <div class="card"><div class="card-body"><div class="empty">
+            <div class="empty-title">数据加载失败</div>
+            <div class="empty-desc">${esc(failure?.message || "请稍后重试")}</div>
+            <button class="btn" id="refresh">${icon("refresh", 15)}重新加载</button>
+          </div></div></div>`,
+        after(root) {
+          root.querySelector("#refresh")?.addEventListener("click", () => location.reload());
+        },
+      };
+    }
+
+    const skills = (data.skills || []).map((item) => ({
+      label: item.skill,
+      value: Math.max(0, Math.min(1, (item.score ?? 0) / 100)),
+      tone: (item.score ?? 0) >= 75 ? "ok" : (item.score ?? 0) >= 55 ? "" : "warn",
+    }));
+    const weaknesses = data.weaknesses || [];
+    const recent = data.recentInterviews || [];
+    const trendPoints = data.scoreTrend || [];
+    const trendLabels = data.trendLabels || [];
+    const suggestions = data.aiSuggestions || [];
+    const weakTopicNames = data.learningRecommendation?.weakTopics || weaknesses.map((item) => item.name);
+    const dueToday = data.todayReviewCount ?? 0;
 
     const html = `
       <div class="page-head">
         <div>
           <h1 class="page-title">概览</h1>
-          <p class="page-sub">
-            最近 14 天的面试表现、能力维度与待补强的知识点。
-            ${data.__partial ? "部分数据来自演示样本。" : ""}
-          </p>
+          <p class="page-sub">面试表现、能力维度与待补强的知识点。</p>
         </div>
         <div class="page-actions">
           <button class="btn" id="refresh">${icon("refresh", 15)}刷新</button>
@@ -134,10 +152,16 @@ export default {
       </div>
 
       <div class="grid grid-4" style="margin-bottom:16px">
-        ${statCard(k.sessions.label, fmt.num(k.sessions.value), "场", k.sessions.delta, "layers")}
-        ${statCard(k.avgScore.label, fmt.num(k.avgScore.value, 1), k.avgScore.unit, k.avgScore.delta, "target")}
-        ${statCard(k.weakTopics.label, fmt.num(k.weakTopics.value), k.weakTopics.unit, k.weakTopics.delta, "warn")}
-        ${statCard(k.practice.label, fmt.num(k.practice.value), k.practice.unit, k.practice.delta, "clock")}
+        ${statCard("累计面试", fmt.num(data.totalSessions ?? 0), "场", "layers", "含进行中的场次")}
+        ${statCard(
+          "平均得分",
+          data.averageScore == null ? "—" : fmt.num(data.averageScore),
+          data.averageScore == null ? "" : "分",
+          "target",
+          "只统计已评分的场次",
+        )}
+        ${statCard("今日待复习", fmt.num(dueToday), "张", "clock", dueToday ? "按遗忘曲线到期" : "今天没有到期卡片")}
+        ${statCard("待攻克薄弱点", fmt.num(weaknesses.length), "个", "warn", "来自历次复盘")}
       </div>
 
       <div class="grid grid-2-1" style="margin-bottom:16px">
@@ -145,21 +169,38 @@ export default {
           <div class="card-head">
             <div>
               <div class="card-title">得分趋势</div>
-              <div class="card-desc">每场面试的加权总分，14 天窗口</div>
+              <div class="card-desc">每场面试的加权总分</div>
             </div>
             <div class="card-head-actions">
-              ${badge(`均值 ${fmt.num(
-                trend.points.reduce((a, b) => a + b, 0) / trend.points.length,
-                1,
-              )}`, "neutral")}
+              ${
+                trendPoints.length
+                  ? badge(
+                      `均值 ${fmt.num(trendPoints.reduce((a, b) => a + b, 0) / trendPoints.length, 1)}`,
+                      "neutral",
+                    )
+                  : badge("暂无评分", "neutral")
+              }
             </div>
           </div>
-          <div class="card-body">${areaChart(trend.points, { labels: trend.labels })}</div>
-          <div class="card-foot">
-            <span>共 ${trend.points.length} 个采样点</span>
-            <span class="spacer"></span>
-            <span>波动区间 ${Math.min(...trend.points)} – ${Math.max(...trend.points)}</span>
+          <div class="card-body">
+            ${
+              trendPoints.length >= 2
+                ? areaChart(trendPoints, { labels: trendLabels })
+                : `<div class="empty" style="padding:28px">
+                    <div class="empty-title">${trendPoints.length ? "再面一场就有趋势了" : "还没有评分数据"}</div>
+                    <div class="empty-desc">每场面试回答后的评分会记录在这里。</div>
+                  </div>`
+            }
           </div>
+          ${
+            trendPoints.length
+              ? `<div class="card-foot">
+                  <span>共 ${trendPoints.length} 个采样点</span>
+                  <span class="spacer"></span>
+                  <span>区间 ${Math.min(...trendPoints)} – ${Math.max(...trendPoints)}</span>
+                </div>`
+              : ""
+          }
         </div>
 
         <div class="card">
@@ -169,17 +210,15 @@ export default {
               <div class="card-desc">按遗忘曲线到期</div>
             </div>
           </div>
-          <div class="card-body stack" style="justify-items:center;gap:14px">
-            ${ring(review.dueToday / 12, { label: `今日到期 ${review.dueToday} 张` })}
-            <div class="row" style="gap:18px;font-size:12px;color:var(--ink-3)">
-              <span>${icon("bolt", 13)} 连续 ${review.streakDays} 天</span>
-              <span>${icon("plus", 13)} 新增 ${review.newCards} 张</span>
-            </div>
+          <div class="card-body stack" style="justify-items:center;gap:12px;text-align:center">
+            <div class="stat-value" style="font-size:38px">${fmt.num(dueToday)}</div>
+            <div class="hint">${dueToday ? "张闪卡等待复习" : "今天没有到期卡片"}</div>
+            <button class="btn btn-primary btn-sm" data-go="#/review">
+              ${icon("bolt", 13)}${dueToday ? "开始复习" : "看看复习计划"}
+            </button>
           </div>
           <div class="card-foot">
             <span>复习会更新长期记忆</span>
-            <span class="spacer"></span>
-            <button class="btn btn-sm btn-ghost" data-go="#/memory">查看记忆 ${icon("chevron", 12)}</button>
           </div>
         </div>
       </div>
@@ -189,23 +228,33 @@ export default {
           <div class="card-head">
             <div>
               <div class="card-title">能力维度</div>
-              <div class="card-desc">最近 8 场面试的拆项均分</div>
+              <div class="card-desc">来自简历解析与历次复盘合并</div>
             </div>
           </div>
-          <div class="card-body">${barList(data.dimensions)}</div>
+          <div class="card-body">
+            ${
+              skills.length
+                ? barList(skills)
+                : `<div class="empty" style="padding:26px">
+                    <div class="empty-title">还没有能力画像</div>
+                    <div class="empty-desc">在简历库上传一份简历，解析后这里会出现技能水位。</div>
+                    <button class="btn btn-sm" data-go="#/resume">去简历库</button>
+                  </div>`
+            }
+          </div>
         </div>
 
         <div class="card">
           <div class="card-head">
             <div>
               <div class="card-title">待攻克知识点</div>
-              <div class="card-desc">按被追问次数与得分排序</div>
+              <div class="card-desc">按被追问次数排序</div>
             </div>
             <div class="card-head-actions">
               <button class="btn btn-sm btn-ghost" data-go="#/knowledge">知识图谱 ${icon("chevron", 12)}</button>
             </div>
           </div>
-          <div class="card-body tight">${weakList(data.weakTopics)}</div>
+          <div class="card-body tight">${weaknessList(weaknesses)}</div>
         </div>
       </div>
 
@@ -216,10 +265,10 @@ export default {
             <div class="card-desc">点击可回看该场的复盘报告</div>
           </div>
           <div class="card-head-actions">
-            <button class="btn btn-sm btn-ghost" data-go="#/report">全部报告 ${icon("chevron", 12)}</button>
+            <button class="btn btn-sm btn-ghost" data-go="#/interview">再面一场 ${icon("chevron", 12)}</button>
           </div>
         </div>
-        <div class="card-body tight">${recentTable(data.recent)}</div>
+        <div class="card-body tight">${recentTable(recent)}</div>
       </div>
 
       <div class="stack" style="gap:12px">
@@ -227,7 +276,7 @@ export default {
           <h2 style="font-size:15px">下一步建议</h2>
           <span class="hint">由最近的评分与薄弱点生成</span>
         </div>
-        ${suggestionCards(data.suggestions)}
+        ${suggestionCards(suggestions, weakTopicNames)}
       </div>
     `;
 
@@ -242,14 +291,15 @@ export default {
 
         root.querySelectorAll("[data-report]").forEach((node) => {
           node.addEventListener("click", () => {
-            store.session.report = node.dataset.report;
+            store.session.sessionId = node.dataset.report;
             location.hash = "#/report";
           });
         });
 
         root.querySelectorAll("[data-start-topic]").forEach((node) => {
           node.addEventListener("click", () => {
-            store.set({ topic: node.dataset.startTopic });
+            const topic = node.dataset.startTopic;
+            if (topic) store.set({ topic });
             location.hash = "#/interview";
           });
         });

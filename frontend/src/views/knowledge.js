@@ -1,13 +1,16 @@
 /**
  * 知识图谱页。
  *
- * 布局用一个小型力导向模拟（几十个节点，120 次迭代，浏览器里毫秒级完成），
+ * 数据来自 GET /api/graph（GraphRAG 实体与关系，由历次面试复盘抽取）。
+ * 后端返回 { nodes:[{id,name,type,importanceScore}], links:[{source,target,...}] }，
+ * 这里归一化成绘图用的 { nodes:[{id,label,weight,type}], edges:[[a,b]] }。
+ *
+ * 布局用一个小型力导向模拟（几十个节点，140 次迭代，浏览器里毫秒级完成），
  * 不引入 d3 —— 为了三四十行代码加一个 300KB 依赖不划算。
  */
 
 import { api } from "../api.js";
 import { store } from "../store.js";
-import { mockGraph } from "../mock.js";
 import { badge, esc, fmt, icon, toast } from "../ui.js";
 
 const WIDTH = 920;
@@ -20,7 +23,7 @@ function layout(nodes, edges) {
   const radius = Math.min(WIDTH, HEIGHT) * 0.34;
 
   const points = nodes.map((node, index) => {
-    const angle = (index / nodes.length) * Math.PI * 2;
+    const angle = (index / Math.max(nodes.length, 1)) * Math.PI * 2;
     const r = radius * (0.65 + ((index * 37) % 30) / 100);
     return { id: node.id, x: cx + Math.cos(angle) * r, y: cy + Math.sin(angle) * r };
   });
@@ -111,7 +114,7 @@ function renderSvg(graph, selectedId) {
       const hub = node.weight >= 4;
       const dim = selectedId && !neighborIds.has(node.id);
       const r = hub ? 20 : 13 + Math.min(4, node.weight || 0);
-      return `<g class="gnode ${hub ? "hub" : ""}" data-node="${node.id}"
+      return `<g class="gnode ${hub ? "hub" : ""}" data-node="${esc(node.id)}"
           transform="translate(${point.x.toFixed(1)},${point.y.toFixed(1)})"
           style="cursor:pointer;opacity:${dim ? 0.35 : 1}">
         <circle r="${r}" />
@@ -133,33 +136,46 @@ function entityList(graph, keyword) {
   }
   return `<div class="list">${rows
     .map(
-      (node) => `<div class="list-item" data-node-row="${node.id}" style="cursor:pointer">
+      (node) => `<div class="list-item" data-node-row="${esc(node.id)}" style="cursor:pointer">
         <div class="icon-box ${node.weight >= 4 ? "accent" : ""}">${icon("knowledge", 14)}</div>
         <div class="li-main">
           <div class="li-title">${esc(node.label)}</div>
-          <div class="li-meta">${esc(node.type)} · 权重 ${node.weight}</div>
+          <div class="li-meta">${esc(node.type || "实体")} · 权重 ${node.weight}</div>
         </div>
       </div>`,
     )
     .join("")}</div>`;
 }
 
-async function loadGraph() {
-  if (store.settings.demo) return mockGraph;
-  try {
-    const raw = await api.graph();
-    if (!raw || !Array.isArray(raw.nodes) || !Array.isArray(raw.edges)) {
-      return mockGraph;
-    }
-    return {
-      nodes: raw.nodes,
-      edges: raw.edges.map((edge) => (Array.isArray(edge) ? edge : [edge.from, edge.to])),
-      stats: raw.stats || mockGraph.stats,
-    };
-  } catch (error) {
-    toast(`图谱加载失败：${error.message}`, "warn");
-    return mockGraph;
+/** 后端 GraphDTO → 绘图模型。id 统一转字符串，避免数字/字符串比较踩坑。 */
+function normalizeGraph(raw) {
+  const nodes = (raw?.nodes || [])
+    .map((node) => ({
+      id: String(node.id ?? node.name),
+      label: node.name || node.label || "未命名",
+      type: node.type || "实体",
+      weight: Math.max(1, Math.min(5, Math.round((node.importanceScore ?? node.masteryLevel ?? 60) / 20))),
+    }))
+    .filter((node) => node.id);
+
+  const known = new Set(nodes.map((node) => node.id));
+  const edges = [];
+  for (const link of raw?.links || []) {
+    const from = String(link.source ?? "");
+    const to = String(link.target ?? "");
+    if (!from || !to || !known.has(from) || !known.has(to) || from === to) continue;
+    edges.push([from, to]);
   }
+  return {
+    nodes,
+    edges,
+    stats: { entities: nodes.length, relations: edges.length, indexedAt: raw?.indexedAt || null },
+  };
+}
+
+async function loadGraph() {
+  const raw = await api.graph(store.settings.userId);
+  return normalizeGraph(raw);
 }
 
 export default {
@@ -167,11 +183,15 @@ export default {
   title: "知识图谱",
 
   async render() {
-    const graph = await loadGraph();
-    let selected = null;
+    let graph = null;
+    let failure = null;
+    try {
+      graph = await loadGraph();
+    } catch (error) {
+      failure = error;
+    }
 
-    const html = `
-      <div class="page-head">
+    const head = `<div class="page-head">
         <div>
           <h1 class="page-title">知识图谱</h1>
           <p class="page-sub">从历次面试的追问与评分里抽取的实体与关系，用于决定下一题考什么。</p>
@@ -183,7 +203,32 @@ export default {
           </div>
           <button class="btn" id="g-refresh">${icon("refresh", 15)}刷新</button>
         </div>
-      </div>
+      </div>`;
+
+    if (!graph || !graph.nodes.length) {
+      return {
+        html: `${head}
+          <div class="card"><div class="card-body"><div class="empty">
+            <div class="empty-title">${failure ? "图谱加载失败" : "图谱还没有内容"}</div>
+            <div class="empty-desc">${esc(
+              failure ? failure.message : "完成一场面试并生成复盘后，知识点与关系会在这里逐步长出来。",
+            )}</div>
+            <button class="btn btn-primary" data-go="#/interview">去面试</button>
+          </div></div></div>`,
+        after(root) {
+          root.querySelector("#g-refresh")?.addEventListener("click", () => location.reload());
+          root.querySelectorAll("[data-go]").forEach((node) => {
+            node.addEventListener("click", () => {
+              location.hash = node.dataset.go;
+            });
+          });
+        },
+      };
+    }
+
+    let selected = null;
+
+    const html = `${head}
 
       <div class="grid grid-2-1">
         <div class="card">
@@ -201,9 +246,9 @@ export default {
             <div class="graph-stage" id="g-stage">${renderSvg(graph, null)}</div>
           </div>
           <div class="card-foot">
-            <span>索引时间 ${esc(fmt.rel(graph.stats?.indexedAt))}</span>
+            <span>${graph.stats.indexedAt ? `索引时间 ${esc(fmt.rel(graph.stats.indexedAt))}` : "由历次面试复盘逐步累积"}</span>
             <span class="spacer"></span>
-            <span>实体 ${fmt.num(graph.stats?.entities ?? 0)} · 关系 ${fmt.num(graph.stats?.relations ?? 0)}</span>
+            <span>实体 ${fmt.num(graph.stats.entities)} · 关系 ${fmt.num(graph.stats.relations)}</span>
           </div>
         </div>
 
@@ -216,6 +261,25 @@ export default {
           </div>
           <div class="card-body tight scroll-y" id="g-list" style="max-height:520px">
             ${entityList(graph, "")}
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="card-head">
+          <div class="icon-box accent">${icon("search", 15)}</div>
+          <div>
+            <div class="card-title">知识问答</div>
+            <div class="card-desc">基于图谱与记忆的检索问答，语气为学习辅导而非面试</div>
+          </div>
+        </div>
+        <div class="card-body stack" style="gap:14px">
+          <div class="row">
+            <input class="input" id="k-question" placeholder="例如：G1 的 Mixed GC 和老年代占比是什么关系？" />
+            <button class="btn btn-primary" id="k-ask" style="flex:none">${icon("send", 14)}提问</button>
+          </div>
+          <div id="k-answer">
+            <div class="hint">提问后会走检索增强链路，答案只基于召回证据。</div>
           </div>
         </div>
       </div>
@@ -232,7 +296,7 @@ export default {
           stage.innerHTML = renderSvg(graph, selected);
           const node = graph.nodes.find((item) => item.id === selected);
           hint.textContent = node ? `已选中：${node.label}` : "按权重排序";
-          list.innerHTML = entityList(graph, root.querySelector("#g-search").value);
+          list.innerHTML = entityList(graph, root.querySelector("#g-search")?.value || "");
         };
 
         stage.addEventListener("click", (event) => {
@@ -249,8 +313,46 @@ export default {
           paint();
         });
 
-        root.querySelector("#g-search").addEventListener("input", () => paint());
         root.querySelector("#g-refresh").addEventListener("click", () => location.reload());
+        root.querySelector("#g-search")?.addEventListener("input", () => paint());
+
+        // ---- 知识问答 ----
+        const input = root.querySelector("#k-question");
+        const output = root.querySelector("#k-answer");
+        const askButton = root.querySelector("#k-ask");
+
+        const ask = async () => {
+          const question = input.value.trim();
+          if (!question) {
+            toast("先输入一个问题", "warn");
+            return;
+          }
+          askButton.disabled = true;
+          output.innerHTML = `<div class="hint">检索中…</div>`;
+          try {
+            const raw = await api.ask({ userId: store.settings.userId, question });
+            const answer = typeof raw === "string" ? raw : raw?.answer || JSON.stringify(raw);
+            output.innerHTML = `<div class="card" style="box-shadow:none">
+              <div class="card-body" style="padding:14px 16px">
+                <div class="hint" style="margin-bottom:8px">回答</div>
+                <div style="font-size:13px;line-height:1.85;color:var(--ink-2);white-space:pre-wrap">${esc(
+                  answer,
+                )}</div>
+              </div>
+            </div>`;
+          } catch (error) {
+            output.innerHTML = `<div class="hint" style="color:var(--danger)">问答失败：${esc(
+              error.message,
+            )}</div>`;
+          } finally {
+            askButton.disabled = false;
+          }
+        };
+
+        askButton.addEventListener("click", ask);
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") ask();
+        });
       },
     };
   },

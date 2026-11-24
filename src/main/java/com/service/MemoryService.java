@@ -133,6 +133,17 @@ public class MemoryService {
                 .toList();
     }
 
+    /**
+     * 最近写入的记忆片段（「记忆与画像」页的"最近沉淀"）。
+     */
+    public List<MemoryChunk> recentChunks(Long userId, Integer limit) {
+        int size = limit == null || limit <= 0 ? 5 : Math.min(limit, 50);
+        return memoryChunkMapper.selectList(new LambdaQueryWrapper<MemoryChunk>()
+                .eq(MemoryChunk::getUserId, userId)
+                .orderByDesc(MemoryChunk::getId)
+                .last("LIMIT " + size));
+    }
+
     public void saveInterviewExtraction(Long userId, Long sessionId, String extractionJson) {
         // 1. 保存为 Markdown 总结
         String md = """

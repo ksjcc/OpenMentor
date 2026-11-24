@@ -11,6 +11,18 @@ public class InterviewSession {
     private Long id;
     private Long userId;
     private String interviewType;
+    /**
+     * 本场面试的主题（例如「Redis 持久化」）。创建时写入，复盘与列表都要用。
+     */
+    private String topic;
+    /**
+     * 本场面试注入的简历（简历库中的一份），可为空。
+     */
+    private Long resumeId;
+    /**
+     * 候选人额外补充的项目摘要，创建面试时填写，注入上下文。
+     */
+    private String projectSummary;
     private String targetRole;
     private String status;
     private Integer score;
@@ -133,6 +145,30 @@ public class InterviewSession {
 
     public void setTargetRole(String targetRole) {
         this.targetRole = targetRole;
+    }
+
+    public String getTopic() {
+        return topic;
+    }
+
+    public void setTopic(String topic) {
+        this.topic = topic;
+    }
+
+    public Long getResumeId() {
+        return resumeId;
+    }
+
+    public void setResumeId(Long resumeId) {
+        this.resumeId = resumeId;
+    }
+
+    public String getProjectSummary() {
+        return projectSummary;
+    }
+
+    public void setProjectSummary(String projectSummary) {
+        this.projectSummary = projectSummary;
     }
 
     public LocalDateTime getStartTime() {

@@ -31,7 +31,32 @@ public class RecentInterviewDTO {
   private String status;
 
   /**
+   * 面试主题
+   */
+  private String topic;
+
+  /**
+   * 本场加权总分
+   */
+  private Integer score;
+
+  /**
+   * AI 提问轮次
+   */
+  private Integer turns;
+
+  /**
+   * 最突出的薄弱点，用于列表里给个直观提示
+   */
+  private String topWeakness;
+
+  /**
    * 创建时间
    */
   private LocalDateTime createdAt;
+
+  /**
+   * 结束时间
+   */
+  private LocalDateTime endedAt;
 }
