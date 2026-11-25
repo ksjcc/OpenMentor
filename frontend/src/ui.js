@@ -156,6 +156,40 @@ export function toast(message, tone = "neutral", ttl = 3200) {
   }, ttl);
 }
 
+/**
+ * 通用弹窗：传标题 + 一段 HTML，返回 close()。
+ * 用于「关联知识点」这类只读展示，不需要确认按钮。
+ */
+export function openModal({ title = "", html = "", width = 760 } = {}) {
+  const backdrop = el("div", { class: "modal-backdrop", role: "dialog", "aria-modal": "true" });
+  const modal = el("div", { class: "modal", style: `width:min(${width}px, 100%)` });
+  modal.innerHTML = `
+    <div class="modal-head">
+      <h3 class="modal-title">${esc(title)}</h3>
+      <button class="btn btn-ghost btn-sm" data-close type="button" aria-label="关闭">${icon("close", 15)}</button>
+    </div>
+    <div class="modal-body modal-body-scroll">${html}</div>`;
+
+  const close = () => {
+    backdrop.remove();
+    document.removeEventListener("keydown", onKey);
+  };
+  const onKey = (event) => {
+    if (event.key === "Escape") close();
+  };
+
+  modal.addEventListener("click", (event) => {
+    if (event.target.closest("[data-close]")) close();
+  });
+  backdrop.addEventListener("click", (event) => {
+    if (event.target === backdrop) close();
+  });
+  document.addEventListener("keydown", onKey);
+  backdrop.append(modal);
+  document.body.append(backdrop);
+  return close;
+}
+
 export function confirmDialog({
   title = "确认操作",
   body = "",

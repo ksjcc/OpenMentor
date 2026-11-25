@@ -248,7 +248,7 @@ public class DashboardService {
 
       RecentInterviewDTO dto = new RecentInterviewDTO();
 
-      dto.setSessionId(session.getId());
+      dto.setSessionId(String.valueOf(session.getId()));
       dto.setInterviewType(session.getInterviewType());
       dto.setTargetRole(session.getTargetRole());
       dto.setStatus(session.getStatus());

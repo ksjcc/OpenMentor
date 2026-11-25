@@ -27,6 +27,11 @@ public class Flashcard {
     private String answer;
 
     /**
+     * 知识点主题（例如「Redis 持久化」），用于按主题聚合与「关联知识点」弹窗。
+     */
+    private String topic;
+
+    /**
      * 关联知识点ID（可选）
      */
     private Long knowledgeNodeId;

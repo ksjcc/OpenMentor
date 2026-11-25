@@ -238,13 +238,14 @@ export const api = {
     topic,
     projectSummary,
     resumeId,
+    remember,
     idempotencyKey,
     onEvent,
     signal,
   }) {
     return streamSSE("/api/interview/start", {
       method: "POST",
-      params: { userId, interviewType, targetRole, topic, projectSummary, resumeId },
+      params: { userId, interviewType, targetRole, topic, projectSummary, resumeId, remember },
       // 同一次提交重发时这个键不变，后端据此重放到同一场面试
       headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
       onEvent,
@@ -337,11 +338,26 @@ export const api = {
     return request("/api/review/today", { params: { userId } });
   },
 
+  /** 每日练习计划：今天起 N 天，每天题量/完成情况/正确率。 */
+  reviewCalendar(userId = store.settings.userId, days = 7) {
+    return request("/api/review/calendar", { params: { userId, days } });
+  },
+
+  /** 某一天（YYYY-MM-DD）的正式练习题目。 */
+  reviewPractice(date, userId = store.settings.userId) {
+    return request("/api/review/practice", { params: { userId, date } });
+  },
+
+  /** 「关联知识点」：同主题 + 知识图谱邻居主题的历史闪卡。 */
+  reviewRelated(cardId, userId = store.settings.userId) {
+    return request("/api/review/related", { params: { userId, cardId } });
+  },
+
   /** 提交一张闪卡的复习结果，遗忘曲线据此调整下次到期时间。 */
-  submitReview({ cardId, correct }) {
+  submitReview({ cardId, correct, userId = store.settings.userId }) {
     return request("/api/review/submit", {
       method: "POST",
-      params: { cardId, correct },
+      params: { cardId, correct, userId },
     });
   },
 

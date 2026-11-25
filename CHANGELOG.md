@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-11-25
+
+### Review training — rebuilt around daily practices
+
+- The review page is now day-based: `#/review` lists the next 7 days (题量 / 已完成 / 正确率 / 错误次数), and clicking a day opens that day's practice at `#/review?date=YYYY-MM-DD`.
+- A card belongs to the day of its `next_review_time`; overdue cards roll into today so they can still be cleared. Answering reschedules the card, which removes it from that day's list.
+- Every answer writes a `review_record` row (with `practice_date` + topic snapshot), so each practice reports 正确率、答对/答错数, and the day's summary survives a page reload.
+- Each question has a 「关联知识点」 button (top-right) that opens a modal with related historical flashcards: same topic first, then topics that are one hop away in the knowledge graph.
+- Flashcards now carry a `topic` (from the interview topic, falling back to the first weakness). Duplicate questions are no longer inserted twice by repeated post-processing.
+- Backend: new `ReviewPracticeService`, endpoints `GET /api/review/calendar`, `GET /api/review/practice`, `GET /api/review/related`, and `POST /api/review/submit` now accepts `userId` to return the day's running totals. Migration `V20261125_02` adds `flashcard.topic`, `review_record.topic`/`practice_date` + index.
+- Removed the sample-data fallback from the review page (weak-point card now shows a real empty state).
+
+### Interview setup (To C)
+
+- Remove the 「这一场会怎么进行」 explainer column from the interview setup page — it was internal onboarding copy, not something a candidate needs.
+- Make 面试主题 optional: leaving it blank no longer blocks starting an interview, and `interview_session.topic` stays NULL. The default draft topic is now 「JAVA八股拷打」. Record/report lists show 「通用面试」 when a session has no topic.
+- Add a 「把这次面试记入长期记忆」 switch (default on). When off, the interview still produces a full report but skips profile merge / memory chunks / flashcards / graph indexing; the session records `post_process_status = SKIPPED`.
+- Surface the choice: the running session panel shows 记忆沉淀 已开启/本场不记入, and the report page shows 已记入/未记入长期记忆.
+
+### Backend
+
+- `POST /api/interview/start` accepts optional `remember` (default true) and optional `topic`; new column `interview_session.remember_in_memory` (migration `V20261125_01`).
+- `InterviewReportDTO` / `InterviewSummaryDTO` expose `remembered` so the UI can render the choice.
+- `IdempotencyGuard.remember` no longer prints a full stack trace when Redis is down (it degrades to the in-process cache; the stack spam made every "start interview" click look like a failure).
+
 ## 2026-11-23
 
 ### Backend

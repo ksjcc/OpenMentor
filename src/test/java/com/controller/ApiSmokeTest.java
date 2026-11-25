@@ -15,6 +15,7 @@ import com.service.KnowledgeQaService;
 import com.service.KnowledgeGraphService;
 import com.service.MemoryService;
 import com.service.ReviewService;
+import com.service.review.ReviewPracticeService;
 import com.service.Dashboard.DashboardService;
 import com.service.Dashboard.FlashcardService;
 import com.service.resume.ResumeService;
@@ -56,6 +57,9 @@ class ApiSmokeTest {
   private ReviewService reviewService;
 
   @Mock
+  private ReviewPracticeService reviewPracticeService;
+
+  @Mock
   private DashboardService dashboardService;
 
   @Mock
@@ -75,7 +79,7 @@ class ApiSmokeTest {
     mockMvc = MockMvcBuilders.standaloneSetup(
         new InterviewController(interviewService),
         new KnowledgeController(knowledgeQaService),
-        new ReviewController(reviewService, flashcardService),
+        new ReviewController(reviewService, flashcardService, reviewPracticeService),
         new DashboardController(dashboardService),
         new KnowledgeGraphController(knowledgeGraphService),
         new MemoryController(memoryService),
@@ -87,7 +91,7 @@ class ApiSmokeTest {
   void startInterviewRunsThrough() throws Exception {
     SseEmitter emitter = new SseEmitter();
     emitter.complete();
-    when(interviewService.startInterviewStream(1L, "TECH", "Java后端开发", "Redis", null, null, null))
+    when(interviewService.startInterviewStream(1L, "TECH", "Java后端开发", "Redis", null, null, null, null))
         .thenReturn(emitter);
 
     var mvcResult = mockMvc.perform(post("/api/interview/start")
@@ -106,7 +110,7 @@ class ApiSmokeTest {
   void startInterviewPassesResumeIdAndIdempotencyKey() throws Exception {
     SseEmitter emitter = new SseEmitter();
     emitter.complete();
-    when(interviewService.startInterviewStream(1L, "TECH", "Java后端开发", "Redis", null, 7L, "idem-1"))
+    when(interviewService.startInterviewStream(1L, "TECH", "Java后端开发", "Redis", null, 7L, null, "idem-1"))
         .thenReturn(emitter);
 
     var mvcResult = mockMvc.perform(post("/api/interview/start")
@@ -126,14 +130,14 @@ class ApiSmokeTest {
   @Test
   void interviewListAndReportRunThrough() throws Exception {
     InterviewSummaryDTO summary = new InterviewSummaryDTO();
-    summary.setSessionId(10L);
+    summary.setSessionId("10");
     summary.setTopic("Redis 持久化");
     summary.setStatus("FINISHED");
     summary.setScore(82);
     when(interviewService.listInterviews(1L, null)).thenReturn(List.of(summary));
 
     InterviewReportDTO report = new InterviewReportDTO();
-    report.setSessionId(10L);
+    report.setSessionId("10");
     report.setTopic("Redis 持久化");
     report.setScore(82);
     report.setSummary("整体稳定");
@@ -142,7 +146,7 @@ class ApiSmokeTest {
     mockMvc.perform(get("/api/interview")
         .param("userId", "1"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data[0].sessionId").value(10))
+        .andExpect(jsonPath("$.data[0].sessionId").value("10"))
         .andExpect(jsonPath("$.data[0].score").value(82));
 
     mockMvc.perform(get("/api/interview/{sessionId}", 10L)

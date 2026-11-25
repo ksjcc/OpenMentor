@@ -83,11 +83,10 @@ public class InterviewService {
          */
         @Transactional(rollbackFor = Exception.class)
         public SseEmitter startInterviewStream(Long userId, String interviewType, String targetRole, String topic,
-                        String projectSummary, Long resumeId, String idempotencyKey) {
+                        String projectSummary, Long resumeId, Boolean remember, String idempotencyKey) {
                 SseEmitter emitter = new SseEmitter(0L);
                 validateRequired(userId, "用户ID不能为空");
                 validateText(interviewType, "面试类型不能为空");
-                validateText(topic, "面试主题不能为空");
 
                 Resume resume = resolveResume(userId, resumeId);
                 String effectiveTargetRole = firstNonBlank(targetRole,
@@ -114,10 +113,12 @@ public class InterviewService {
                         InterviewSession session = new InterviewSession();
                         session.setUserId(userId);
                         session.setInterviewType(interviewType);
-                        session.setTopic(topic);
+                        // 主题可选：留空就不限定主题，由面试官按岗位与简历自由出题
+                        session.setTopic(trimToNull(topic));
                         session.setTargetRole(effectiveTargetRole);
                         session.setResumeId(resume == null ? null : resume.getId());
                         session.setProjectSummary(trimToNull(projectSummary));
+                        session.setRememberInMemory(remember == null || remember ? 1 : 0);
                         session.setStatus(STATUS_IN_PROGRESS);
                         session.setStartTime(LocalDateTime.now());
                         interviewSessionMapper.insert(session);
@@ -127,7 +128,8 @@ public class InterviewService {
                         }
 
                         // 2. 交给 harness 出第一题（question/answer 都为空 → 由 system prompt 决定开局）
-                        CandidateContext context = buildCandidateContext(session, topic, resume, projectSummary);
+                        CandidateContext context = buildCandidateContext(session,
+                                        firstNonBlank(topic, session.getTopic()), resume, projectSummary);
                         TurnOutcome outcome = interviewHarnessService.ask(
                                         userId, sessionId, context, null, null, 1);
 
@@ -284,13 +286,28 @@ public class InterviewService {
                 interviewSessionMapper.updateById(update);
 
                 // 5. 投递后处理消息（画像合并 / 记忆更新 / 闪卡 / 图谱索引）
-                InterviewPostProcessMessage message = new InterviewPostProcessMessage();
-                message.setUserId(userId);
-                message.setSessionId(sessionId);
-                message.setExtractionJson(extractionJson);
-                sendPostProcessAfterCommit(message);
+                //    用户可以选择"本场不下沉到长期记忆"：复盘照常生成，但不写画像/记忆/复习卡。
+                if (shouldRemember(current)) {
+                        InterviewPostProcessMessage message = new InterviewPostProcessMessage();
+                        message.setUserId(userId);
+                        message.setSessionId(sessionId);
+                        message.setExtractionJson(extractionJson);
+                        sendPostProcessAfterCommit(message);
+                } else {
+                        log.info("本场面试未开启记忆下沉，跳过画像/记忆/复习卡更新 sessionId={}", sessionId);
+                        InterviewSession skipped = new InterviewSession();
+                        skipped.setId(sessionId);
+                        skipped.setPostProcessStatus("SKIPPED");
+                        interviewSessionMapper.updateById(skipped);
+                }
 
                 return extractionJson;
+        }
+
+        /** 本场是否开启"下沉到长期记忆"，历史数据（列为空）按开启处理。 */
+        private boolean shouldRemember(InterviewSession session) {
+                return session == null || session.getRememberInMemory() == null
+                                || session.getRememberInMemory() != 0;
         }
 
         /**
@@ -347,7 +364,7 @@ public class InterviewService {
                 List<InterviewSummaryDTO> result = new ArrayList<>(sessions.size());
                 for (InterviewSession session : sessions) {
                         InterviewSummaryDTO dto = new InterviewSummaryDTO();
-                        dto.setSessionId(session.getId());
+                        dto.setSessionId(String.valueOf(session.getId()));
                         dto.setTopic(session.getTopic());
                         dto.setTargetRole(session.getTargetRole());
                         dto.setInterviewType(session.getInterviewType());
@@ -356,6 +373,7 @@ public class InterviewService {
                         dto.setTurns(counters.getOrDefault(session.getId(), new int[1])[0]);
                         dto.setStartedAt(session.getStartTime());
                         dto.setEndedAt(session.getEndedAt());
+                        dto.setRemembered(shouldRemember(session));
                         dto.setTopWeakness(firstWeakness(session.getSummary()));
                         result.add(dto);
                 }
@@ -379,7 +397,7 @@ public class InterviewService {
                 KnowledgeExtractionResult extraction = parseExtractionQuietly(session.getSummary());
 
                 InterviewReportDTO report = new InterviewReportDTO();
-                report.setSessionId(sessionId);
+                report.setSessionId(String.valueOf(sessionId));
                 report.setTopic(session.getTopic());
                 report.setTargetRole(session.getTargetRole());
                 report.setInterviewType(session.getInterviewType());
@@ -388,6 +406,7 @@ public class InterviewService {
                 report.setStartedAt(session.getStartTime());
                 report.setEndedAt(session.getEndedAt());
                 report.setResumeTitle(resumeTitleOf(userId, session.getResumeId()));
+                report.setRemembered(shouldRemember(session));
                 report.setDurationSec(durationSeconds(session));
                 report.setTurns(countAiMessages(messages));
 

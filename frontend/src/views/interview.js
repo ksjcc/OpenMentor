@@ -49,7 +49,7 @@ function setupHtml(resumes = []) {
   const s = store.settings;
   const hasResume = resumes.length > 0;
   return `
-    <div class="grid grid-1-2">
+    <div class="grid" style="grid-template-columns:minmax(0, 640px)">
       <div class="card">
         <div class="card-head"><div>
           <div class="card-title">面试设置</div>
@@ -69,9 +69,8 @@ function setupHtml(resumes = []) {
             <input class="input" id="f-role" value="${esc(s.targetRole)}" placeholder="例如 Java 后端开发" />
           </div>
           <div class="field">
-            <label class="field-label" for="f-topic">面试主题</label>
-            <input class="input" id="f-topic" value="${esc(s.topic)}" placeholder="例如 Redis 持久化" />
-            <div class="field-hint">一个具体主题比"技术面"更能逼出深度追问。</div>
+            <label class="field-label" for="f-topic">面试主题（可选）</label>
+            <input class="input" id="f-topic" value="${esc(s.topic)}" placeholder="例如 Java 八股拷打，留空则不限定主题" />
           </div>
           <div class="field">
             <label class="field-label" for="f-resume">关联简历</label>
@@ -91,37 +90,15 @@ function setupHtml(resumes = []) {
               s.projectSummary,
             )}</textarea>
           </div>
+          <div class="field">
+            <label class="switch">
+              <input type="checkbox" id="f-remember" ${s.remember === false ? "" : "checked"} />
+              <span class="switch-track"></span>
+              <span>把这次面试记入长期记忆</span>
+            </label>
+            <div class="field-hint">关闭后本场只生成复盘，不更新画像、记忆片段和复习卡。</div>
+          </div>
           <button class="btn btn-primary btn-block" id="start">${icon("play", 15)}开始面试</button>
-          <div class="hint">开始后会立即消耗一次模型调用用于出第一题。</div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-head"><div>
-          <div class="card-title">这一场会怎么进行</div>
-          <div class="card-desc">没有固定题库，也没有固定流程</div>
-        </div></div>
-        <div class="card-body stack" style="gap:18px">
-          <div class="list" style="border:1px solid var(--line);border-radius:12px;overflow:hidden">
-            ${[
-              ["读取上下文", "面试官按需调用工具：查历史、查记忆、评分。不需要就不调。"],
-              ["决定动作", "深挖 / 换题 / 提难度 / 结束，由模型根据你的回答判断。"],
-              ["给出问题", "最终回复只包含一个问题，不会一次抛好几个。"],
-            ]
-              .map(
-                ([title, desc], index) => `<div class="list-item">
-                  <div class="icon-box accent">${index + 1}</div>
-                  <div class="li-main">
-                    <div class="li-title">${esc(title)}</div>
-                    <div class="li-meta" style="white-space:normal">${esc(desc)}</div>
-                  </div>
-                </div>`,
-              )
-              .join("")}
-          </div>
-          <div class="hint">
-            提示：回答得越具体，被追问的价值越高。只说"背过答案"通常会被连续追问三层。
-          </div>
         </div>
       </div>
     </div>`;
@@ -176,10 +153,13 @@ function sessionPanelHtml() {
       <div class="card-head"><div><div class="card-title">会话状态</div></div></div>
       <div class="card-body">
         <dl class="kv">
-          <dt>主题</dt><dd>${esc(s.topic || "—")}</dd>
+          <dt>主题</dt><dd>${esc(s.topic || "不限主题")}</dd>
           <dt>目标岗位</dt><dd>${esc(s.targetRole || "—")}</dd>
           <dt>轮次</dt><dd class="num">${s.turnIndex}</dd>
           <dt>当前动作</dt><dd>${badge(action, tone)}</dd>
+          <dt>记忆沉淀</dt><dd>${
+            s.remember === false ? badge("本场不记入", "neutral") : badge("已开启", "ok")
+          }</dd>
           <dt>服务状态</dt><dd>${
             s.degraded ? badge("降级兜底", "warn") : badge("正常", "ok")
           }</dd>
@@ -350,9 +330,11 @@ async function startInterview(root) {
   const resumeSelect = root.querySelector("#f-resume");
   // 0 = 用户显式选择「不关联简历」；null = 没有选择控件，交给后端用默认简历
   const resumeId = resumeSelect && resumeSelect.value !== "" ? Number(resumeSelect.value) : null;
+  const rememberBox = root.querySelector("#f-remember");
+  const remember = rememberBox ? rememberBox.checked : true;
 
-  if (!topic || !targetRole) {
-    toast("主题和目标岗位都要填", "warn");
+  if (!targetRole) {
+    toast("目标岗位要填", "warn");
     return;
   }
 
@@ -369,11 +351,12 @@ async function startInterview(root) {
 
   let message = null;
   try {
-    store.set({ topic, targetRole, interviewType, projectSummary });
+    store.set({ topic, targetRole, interviewType, projectSummary, remember });
     store.resetSession({
       topic,
       targetRole,
       interviewType,
+      remember,
       status: "running",
       startedAt: new Date().toISOString(),
     });
@@ -389,6 +372,7 @@ async function startInterview(root) {
       topic,
       projectSummary,
       resumeId,
+      remember,
       idempotencyKey,
       signal: abortController.signal,
       onEvent: handleEvent(message),

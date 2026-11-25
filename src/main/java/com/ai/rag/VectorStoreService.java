@@ -29,6 +29,8 @@ public class VectorStoreService {
     private final int dimension;
     private final double minScore;
     private final boolean initializeSchema;
+    /** false = 完全关闭向量检索：不建表、不调 embedding、不写库（本机没有 pgvector 时用）。 */
+    private final boolean enabled;
 
     public VectorStoreService(
             EmbeddingModel embeddingModel,
@@ -38,7 +40,8 @@ public class VectorStoreService {
             @Value("${vector-store.pg.table:memory_vector}") String table,
             @Value("${vector-store.pg.dimension:1024}") int dimension,
             @Value("${vector-store.pg.min-score:0.6}") double minScore,
-            @Value("${vector-store.pg.initialize-schema:true}") boolean initializeSchema) {
+            @Value("${vector-store.pg.initialize-schema:true}") boolean initializeSchema,
+            @Value("${vector-store.pg.enabled:true}") boolean enabled) {
         this.embeddingModel = embeddingModel;
         this.url = url;
         this.username = username;
@@ -47,10 +50,15 @@ public class VectorStoreService {
         this.dimension = dimension;
         this.minScore = minScore;
         this.initializeSchema = initializeSchema;
+        this.enabled = enabled;
     }
 
     @PostConstruct
     public void initSchema() {
+        if (!enabled) {
+            log.info("向量检索已关闭（vector-store.pg.enabled=false）：不建表，记忆只落 MySQL");
+            return;
+        }
         if (!initializeSchema) {
             return;
         }
@@ -78,6 +86,9 @@ public class VectorStoreService {
     }
 
     public void addMemoryText(Long userId, Long memoryChunkId, String content) {
+        if (!enabled) {
+            return;
+        }
         if (userId == null || memoryChunkId == null || content == null || content.isBlank()) {
             return;
         }
@@ -108,6 +119,9 @@ public class VectorStoreService {
     }
 
     public List<String> search(Long userId, String query, int maxResults) {
+        if (!enabled) {
+            return List.of();
+        }
         if (userId == null || query == null || query.isBlank() || maxResults <= 0) {
             return List.of();
         }

@@ -131,7 +131,7 @@ function emptyPageHtml(reason) {
 
 function toMarkdown(report) {
   const lines = [
-    `# 面试复盘 · ${report.topic || "未命名主题"}`,
+    `# 面试复盘 · ${report.topic || "通用面试"}`,
     "",
     `- 目标岗位：${report.targetRole || "—"}`,
     `- 得分：${report.score ?? "—"}`,
@@ -173,7 +173,7 @@ function reportPageHtml(report) {
     <div class="page-head">
       <div>
         <h1 class="page-title">面试报告</h1>
-        <p class="page-sub">${esc(report.topic || "未命名主题")} · ${esc(
+        <p class="page-sub">${esc(report.topic || "通用面试")} · ${esc(
           report.targetRole || "未填岗位",
         )} · ${esc(fmt.date(report.startedAt || report.endedAt))}</p>
       </div>
@@ -202,6 +202,11 @@ function reportPageHtml(report) {
               ${badge(`${report.turns ?? 0} 轮`, "neutral")}
               ${badge(fmt.dur(report.durationSec), "neutral")}
               ${report.resumeTitle ? badge(`简历：${report.resumeTitle}`, "neutral") : ""}
+              ${
+                report.remembered === false
+                  ? badge("未记入长期记忆", "neutral")
+                  : badge("已记入长期记忆", "ok")
+              }
             </div>
             <div style="font-size:13.5px;line-height:1.8;color:var(--ink-2)">${esc(
               report.summary || "本场还没有生成总体评价。",

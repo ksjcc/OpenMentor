@@ -13,7 +13,7 @@ public class RecentInterviewDTO {
   /**
    * 面试ID
    */
-  private Long sessionId;
+  private String sessionId;
 
   /**
    * 面试类型

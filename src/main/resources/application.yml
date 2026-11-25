@@ -2,9 +2,13 @@ spring:
   application:
     name: agent-career
 
+  # 本地填 key 的方式：把 .env.example 复制成 .env 填好，这里会把它当作
+  # properties 文件读进来（optional: 表示文件不存在也不报错）。
+  config:
+    import: optional:file:./.env[.properties]
+
   servlet:
     multipart:
-      # 简历文件（pdf/docx）通常几百 KB，留出余量
       max-file-size: 10MB
       max-request-size: 12MB
 
@@ -15,11 +19,19 @@ spring:
     password: ${MYSQL_PASSWORD:12345}
 
   rabbitmq:
-    host: localhost
-    port: 5672
-    username: guest
-    password: guest
-    virtual-host: /
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    virtual-host: ${RABBITMQ_VHOST:/}
+    connection-timeout: ${RABBITMQ_CONNECTION_TIMEOUT:3s}
+    listener:
+      simple:
+        # 本机没有 RabbitMQ 时设为 false：不启动消费者，日志就不会每 5 秒刷一次
+        # "Attempting to connect to: [localhost:5672]" / "Failed to check/redeclare auto-delete queue(s)"。
+        # 代价只是面试结束后的闪卡/画像合并/图谱索引不会自动生成（会话状态停在 PENDING），
+        # 面试本身、复盘报告、复习训练都不受影响。
+        auto-startup: ${RABBITMQ_LISTENER_ENABLED:true}
 
   data:
     redis:
@@ -64,18 +76,46 @@ server:
 langchain4j:
   open-ai:
     chat-model:
-      api-key: ${DASHSCOPE_API_KEY:}
-      base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
-      model-name: qwen-plus
+      # 简历解析 / 评分 / 知识提炼 / 学习计划 用的 chat 模型。
+      # 默认阿里云百炼（dashscope）qwen-plus；只有 DeepSeek key 时，
+      # 把 AI_CHAT_BASE_URL / AI_CHAT_MODEL 指到 DeepSeek 即可（见 .env.example）。
+      # api-key：优先 DASHSCOPE_API_KEY，没填时复用 AGENTSCOPE 的 key。
+      api-key: ${DASHSCOPE_API_KEY:${AGENTSCOPE_MODEL_API_KEY:}}
+      base-url: ${AI_CHAT_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+      model-name: ${AI_CHAT_MODEL:qwen-plus}
       temperature: 0.7
     embedding-model:
-      api-key: ${DASHSCOPE_API_KEY:}
-      base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      # 向量检索用的 embedding。DeepSeek 没有 embedding 接口，
+      # 只配 DeepSeek 时这里会失败（RAG 向量召回降级，不影响面试与复盘）。
+      api-key: ${DASHSCOPE_API_KEY:${AGENTSCOPE_MODEL_API_KEY:}}
+      base-url: ${AI_EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
       model-name: ${AI_EMBEDDING_MODEL:bge-m3}
       dimensions: ${AI_EMBEDDING_DIMENSIONS:1024}
 
+# ============================================================================
+# 面试官 harness（agentscope）用的模型。
+#
+# 项目里有【两套】模型客户端，key 不是同一个：
+#   1. langchain4j（上面 langchain4j.open-ai.*）→ 简历解析、评分、知识提炼
+#   2. agentscope（这里）→ 面试官本体，负责出题/追问/调用工具
+#
+# 默认指向 DeepSeek；换别的 OpenAI 兼容服务只改下面三项即可，例如阿里云百炼：
+#   api-key: 你的 dashscope key
+#   base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+#   name: qwen-plus
+# ============================================================================
+agentscope:
+  model:
+    # 没配 AGENTSCOPE_MODEL_API_KEY 时退回 DEEPSEEK_API_KEY
+    api-key: ${AGENTSCOPE_MODEL_API_KEY:${DEEPSEEK_API_KEY:}}
+    base-url: ${AGENTSCOPE_MODEL_BASE_URL:https://api.deepseek.com/v1}
+    name: ${AGENTSCOPE_MODEL_NAME:deepseek-chat}
+
 vector-store:
   pg:
+    # false = 完全关闭向量检索：不建表、不调 embedding、不写库。
+    # 本机没有 pgvector 时设为 false，记忆只落 MySQL，面试/复盘/复习都不受影响。
+    enabled: ${VECTOR_STORE_ENABLED:true}
     url: jdbc:postgresql://${PGVECTOR_HOST:127.0.0.1}:${PGVECTOR_PORT:5432}/${PGVECTOR_DATABASE:career_vector}
     username: ${PGVECTOR_USERNAME:postgres}
     password: ${PGVECTOR_PASSWORD:12345}

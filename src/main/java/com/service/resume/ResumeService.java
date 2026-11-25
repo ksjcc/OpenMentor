@@ -335,7 +335,8 @@ public class ResumeService {
                 }
                 chunk.append("\n\n结构化画像：").append(parsed);
             }
-            memoryService.saveChunk(userId, "resume", resume.getId(), chunk.toString());
+            // 覆盖式写入：同一份简历只保留最新一条记忆片段，避免每次解析都堆积重复
+            memoryService.replaceChunk(userId, "resume", resume.getId(), chunk.toString());
         } catch (Exception ex) {
             log.warn("写入简历记忆失败 userId={} resumeId={}", userId, resume.getId(), ex);
         }

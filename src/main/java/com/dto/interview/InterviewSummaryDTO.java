@@ -10,7 +10,7 @@ import lombok.Data;
 @Data
 public class InterviewSummaryDTO {
 
-    private Long sessionId;
+    private String sessionId;
 
     private String topic;
 
@@ -28,6 +28,9 @@ public class InterviewSummaryDTO {
     private LocalDateTime startedAt;
 
     private LocalDateTime endedAt;
+
+    /** 本场是否已下沉到长期记忆。 */
+    private Boolean remembered;
 
     /** 本场最突出的一条薄弱点，用于列表里给个直观提示。 */
     private String topWeakness;

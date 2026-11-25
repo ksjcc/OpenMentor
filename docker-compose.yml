@@ -6,11 +6,18 @@ services:
       - "8080:8080"
     environment:
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      AGENTSCOPE_MODEL_API_KEY: ${AGENTSCOPE_MODEL_API_KEY:-}
+      AGENTSCOPE_MODEL_BASE_URL: ${AGENTSCOPE_MODEL_BASE_URL:-https://api.deepseek.com/v1}
+      AGENTSCOPE_MODEL_NAME: ${AGENTSCOPE_MODEL_NAME:-deepseek-chat}
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
       MYSQL_DATABASE: career_mind
       MYSQL_USERNAME: root
       MYSQL_PASSWORD: 12345
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
       PGVECTOR_HOST: postgres
       PGVECTOR_PORT: 5432
       PGVECTOR_DATABASE: career_vector
@@ -22,6 +29,7 @@ services:
       - redis
       - mysql
       - postgres
+      - rabbitmq
 
   mysql:
     image: mysql:8.4
@@ -38,6 +46,23 @@ services:
     ports:
       - "6379:6379"
 
+  # 面试结束后处理（闪卡 / 画像合并 / 图谱索引）走 MQ；本机只想跑面试可以不起它
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # 管理台 http://localhost:15672 （guest/guest）
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
   postgres:
     image: pgvector/pgvector:pg16
     ports:
@@ -52,3 +77,4 @@ services:
 volumes:
   mysql_data:
   pgvector_data:
+  rabbitmq_data:

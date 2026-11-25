@@ -21,8 +21,10 @@ const DEFAULTS = {
   // 面试表单的草稿
   interviewType: "TECH",
   targetRole: "Java 后端开发",
-  topic: "Redis",
+  topic: "JAVA八股拷打",
   projectSummary: "",
+  // 是否把这次面试记入长期记忆（画像/记忆片段/复习卡/图谱）
+  remember: true,
 };
 
 /** 只保留 DEFAULTS 里认识的键，历史版本残留的 baseUrl / demo 会被丢掉。 */
@@ -54,6 +56,7 @@ export const store = {
     topic: "",
     targetRole: "",
     interviewType: "",
+    remember: true,
     status: "idle", // idle | running | finished | error
     turnIndex: 0,
     action: null,

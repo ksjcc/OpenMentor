@@ -33,7 +33,7 @@ function recentTable(rows) {
           const score = row.score;
           const tone = score == null ? "neutral" : score >= 80 ? "ok" : score >= 70 ? "warn" : "danger";
           return `<tr>
-            <td class="strong">${esc(row.topic || "未命名主题")}</td>
+            <td class="strong">${esc(row.topic || "通用面试")}</td>
             <td>${esc(row.targetRole || "—")}</td>
             <td class="num">${row.turns ?? 0}</td>
             <td>${score == null ? badge("未评分", "neutral") : badge(`${score} 分`, tone)}</td>

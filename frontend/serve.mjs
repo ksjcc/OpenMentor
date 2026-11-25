@@ -113,6 +113,17 @@ const server = createServer(async (req, res) => {
   }
 });
 
+server.on("error", (error) => {
+  if (error.code === "EADDRINUSE") {
+    console.error(`\n端口 ${port} 已被占用（可能上次的 node 没退干净，或另一个终端在跑）。`);
+    console.error(`  换个端口： node serve.mjs 8081`);
+    console.error(`  Windows 查占用： netstat -ano | findstr :${port}   然后 taskkill /PID <PID> /F`);
+    console.error(`  macOS/Linux 查占用： lsof -i :${port}\n`);
+    process.exit(1);
+  }
+  throw error;
+});
+
 server.listen(port, () => {
   console.log(`AgentCareer Console → http://localhost:${port}`);
   console.log(`/api/** → ${apiTarget.origin}`);

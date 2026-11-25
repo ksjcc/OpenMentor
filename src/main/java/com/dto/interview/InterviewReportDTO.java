@@ -16,7 +16,7 @@ import lombok.Data;
 @Data
 public class InterviewReportDTO {
 
-    private Long sessionId;
+    private String sessionId;
 
     private String topic;
 
@@ -39,6 +39,9 @@ public class InterviewReportDTO {
 
     /** 本场注入的简历名称，便于回看"这场是拿哪份简历面的"。 */
     private String resumeTitle;
+
+    /** 本场是否已下沉到长期记忆（画像 / 记忆片段 / 复习卡 / 图谱）。 */
+    private Boolean remembered;
 
     private String summary;
 

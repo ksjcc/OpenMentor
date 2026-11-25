@@ -70,7 +70,11 @@ public class InterviewPostProcessConsumer {
       String resumeProjectText = loadResumeProjectText(userId);
       profileMergeService.mergeAndSave(userId, extraction);
       memoryService.updateMemoryFromExtraction(userId, sessionId, extraction);
-      flashcardService.generateFlashcardsFromExtraction(userId, extraction);
+      // 闪卡带上本场面试的主题，复习时可以按知识点聚合
+      flashcardService.generateFlashcardsFromExtraction(
+          userId,
+          extraction,
+          session == null ? null : session.getTopic());
       knowledgeGraphBuilder.buildGraph(userId, extraction);
       graphRagIndexerService.indexText(
           userId,

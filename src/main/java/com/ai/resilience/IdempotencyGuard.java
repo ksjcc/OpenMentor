@@ -104,7 +104,8 @@ public class IdempotencyGuard {
     try {
       redisTemplate.opsForValue().set(resultKey(scope), result, ttl);
     } catch (Exception ex) {
-      log.warn("幂等结果写入失败，降级为本地缓存 scope={}", scope, ex);
+      // 只打一行原因：Redis 没起时每次点"开始面试"都会走到这里，打全栈会淹掉日志
+      log.warn("幂等结果写入失败，降级为本地缓存 scope={} reason={}", scope, ex.getMessage());
       localResult.put(scope, new LocalResult(result, System.currentTimeMillis() + ttl.toMillis()));
     }
   }

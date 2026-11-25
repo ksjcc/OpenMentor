@@ -114,6 +114,29 @@ public class MemoryService {
     }
 
     /**
+     * 覆盖式保存：同一个来源（如某份简历）只保留最新一条片段。
+     *
+     * <p>
+     * 简历每解析一次就会重写一次片段，不清理会不断堆积重复内容，
+     * 「最近沉淀」和 RAG 召回都会被稀释。
+     */
+    public void replaceChunk(Long userId, String sourceType, Long sourceId, String content) {
+        removeChunks(userId, sourceType, sourceId);
+        saveChunk(userId, sourceType, sourceId, content);
+    }
+
+    /** 删掉某个来源已写入的片段（向量库里的旧条目不做删除，向量检索已按 id 去重）。 */
+    public void removeChunks(Long userId, String sourceType, Long sourceId) {
+        if (userId == null || sourceType == null || sourceId == null) {
+            return;
+        }
+        memoryChunkMapper.delete(new LambdaQueryWrapper<MemoryChunk>()
+                .eq(MemoryChunk::getUserId, userId)
+                .eq(MemoryChunk::getSourceType, sourceType)
+                .eq(MemoryChunk::getSourceId, sourceId));
+    }
+
+    /**
      * 关键词检索相关记忆
      */
     public List<MemoryChunk> searchRelevantChunks(Long userId, String keyword, Integer limit) {

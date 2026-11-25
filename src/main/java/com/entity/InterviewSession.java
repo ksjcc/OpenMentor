@@ -23,6 +23,10 @@ public class InterviewSession {
      * 候选人额外补充的项目摘要，创建面试时填写，注入上下文。
      */
     private String projectSummary;
+    /**
+     * 1 = 本场结果下沉到长期记忆（画像合并 / 记忆片段 / 复习卡 / 图谱索引）；0 = 只留本场复盘。
+     */
+    private Integer rememberInMemory;
     private String targetRole;
     private String status;
     private Integer score;
@@ -169,6 +173,14 @@ public class InterviewSession {
 
     public void setProjectSummary(String projectSummary) {
         this.projectSummary = projectSummary;
+    }
+
+    public Integer getRememberInMemory() {
+        return rememberInMemory;
+    }
+
+    public void setRememberInMemory(Integer rememberInMemory) {
+        this.rememberInMemory = rememberInMemory;
     }
 
     public LocalDateTime getStartTime() {

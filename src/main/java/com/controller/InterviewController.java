@@ -37,6 +37,8 @@ public class InterviewController {
          * <p>
          * resumeId 指向简历库中的一份简历，会被注入面试官上下文；
          * 不传时使用该用户的默认简历（没有简历也能正常面试）。
+         * topic 可选，留空则不限定主题。
+         * remember 可选，默认 true；false 表示本场只留复盘，不写入长期记忆。
          */
         @PostMapping("/start")
         @Operation(summary = "启动模拟面试")
@@ -44,9 +46,10 @@ public class InterviewController {
                         @RequestParam Long userId,
                         @RequestParam String interviewType,
                         @RequestParam String targetRole,
-                        @RequestParam String topic,
+                        @RequestParam(required = false) String topic,
                         @RequestParam(required = false) String projectSummary,
                         @RequestParam(required = false) Long resumeId,
+                        @RequestParam(required = false) Boolean remember,
                         @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
                 return interviewService.startInterviewStream(
                                 userId,
@@ -55,6 +58,7 @@ public class InterviewController {
                                 topic,
                                 projectSummary,
                                 resumeId,
+                                remember,
                                 idempotencyKey);
         }
 
